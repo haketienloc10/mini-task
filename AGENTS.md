@@ -52,6 +52,7 @@ Mọi yêu cầu thay đổi cấu trúc (sửa code, cập nhật test, thay đ
 ---
 
 ## [SUBAGENT_ROUTING_PROTOCOL]
+Tuyệt đối **TUÂN THỦ** workflow `Coordinator -> Planner -> Review Plan -> Generator -> Evaluator`
 Định tuyến chính xác subagent chuyên trách (Chỉ định nghĩa phạm vi công việc, không làm thay vai trò của subagent):
 * `harness_planner`: Khi yêu cầu mơ hồ hoặc cần phân rã kiến trúc, thiết lập kế hoạch.
 * `harness_plan_reviewer`: Khi cần kiểm tra, phê duyệt kế hoạch.

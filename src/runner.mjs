@@ -99,7 +99,7 @@ export function buildRunnerCommand(task, runArtifactPath, options = {}) {
 
   return {
     command,
-    args: ['exec', '--full-auto', '-'],
+    args: ['exec', '--sandbox', 'workspace-write', '-'],
     cwd: path.resolve(task.workspacePath),
     prompt,
     stdin: prompt,

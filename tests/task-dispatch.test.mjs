@@ -22,7 +22,8 @@ test('builds default codex exec command without deprecated cwd argument', async 
   assert.equal(runner.command, 'codex');
   assert.deepEqual(runner.args, [
     'exec',
-    '--full-auto',
+    '--sandbox',
+    'workspace-write',
     '-'
   ]);
   assert.equal(runner.cwd, path.resolve(workspace));
@@ -49,7 +50,8 @@ test('builds plain prompt for default task mode', async () => {
   assert.equal(runner.command, 'codex');
   assert.deepEqual(runner.args, [
     'exec',
-    '--full-auto',
+    '--sandbox',
+    'workspace-write',
     '-'
   ]);
   assert.equal(runner.cwd, path.resolve(workspace));

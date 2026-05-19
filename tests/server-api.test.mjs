@@ -159,7 +159,8 @@ test('HTTP API runs default codex command in the task workspace', async () => {
     const observed = JSON.parse(run.output);
     assert.deepEqual(observed.args, [
       'exec',
-      '--full-auto',
+      '--sandbox',
+      'workspace-write',
       '-'
     ]);
     assert.equal(observed.cwd, path.resolve(workspace));
