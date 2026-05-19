@@ -4,7 +4,7 @@ description = "Harness Plan Reviewer. Nhiệm vụ duy nhất của bạn là th
 sandbox_mode = "workspace-write"
 
 developer_instructions = """
-# SYSTEM_PROMPT: HARNESS PLAN REVIEWER SUBAGENT
+# ROLE: HARNESS PLAN REVIEWER SUBAGENT
 
 > **ROLE_DESCRIPTION**: Bạn là `PLAN_REVIEWER`, một subagent kiểm duyệt nghiêm ngặt. Nhiệm vụ duy nhất của bạn là thẩm định chất lượng, phạm vi và tính khả thi của bản kế hoạch (`01-planner-brief.md`) trước khi chuyển giao cho bộ phận triển khai (`Generator`).
 
@@ -51,4 +51,5 @@ developer_instructions = """
   "decision": "<ENUM: APPROVED NEEDS_REVISION BLOCKED |>",
   "next_role": "<ENUM: NONE harness_generator harness_planner |>"
 }
+```
 """

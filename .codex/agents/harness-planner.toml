@@ -38,8 +38,9 @@ developer_instructions = """
 {
   "status": "DONE | BLOCKED",
   "decision": "planned | blocked",
-  "role": "harness_planner",
+  "agent_role": "harness_planner",
   "next_role": "harness_plan_reviewer",
   "blockers": "Mô tả chi tiết lỗi/điểm nghẽn nếu status là BLOCKED, ngược lại để null"
 }
+```
 """
