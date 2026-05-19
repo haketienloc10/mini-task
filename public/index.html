@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Codex Task Dispatch</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="app">
+      <section class="toolbar">
+        <div>
+          <h1>Codex Task Dispatch</h1>
+          <p>Local task board for one-task-one-session Codex CLI runs.</p>
+        </div>
+        <button id="refreshButton" type="button">Refresh</button>
+      </section>
+
+      <section class="layout">
+        <form id="taskForm" class="panel">
+          <h2>Create task</h2>
+          <label>
+            Title
+            <input name="title" required maxlength="120">
+          </label>
+          <label>
+            Description
+            <textarea name="description" required rows="6"></textarea>
+          </label>
+          <label>
+            Workspace path
+            <input name="workspacePath" required placeholder="/home/locdt/Notes/VSCode/mini-task">
+          </label>
+          <label>
+            Subagent
+            <select name="subagent" required></select>
+          </label>
+          <label>
+            Notes
+            <textarea name="notes" rows="3"></textarea>
+          </label>
+          <button type="submit">Create</button>
+          <p id="formMessage" class="message" role="status"></p>
+        </form>
+
+        <section class="panel list-panel">
+          <div class="section-header">
+            <h2>Tasks</h2>
+            <span id="taskCount">0</span>
+          </div>
+          <div id="taskList" class="task-list"></div>
+        </section>
+
+        <section class="panel detail-panel">
+          <div class="section-header">
+            <h2>Task detail</h2>
+            <button id="runButton" type="button" disabled>Run</button>
+          </div>
+          <div id="taskDetail" class="empty">Select a task.</div>
+        </section>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
