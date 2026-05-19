@@ -56,6 +56,57 @@ test('HTTP API creates, lists, details, and runs a task', async () => {
   }
 });
 
+test('HTTP API exposes, accepts, and runs default task mode', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codex-task-dispatch-api-default-mode-'));
+  const workspace = await mkdtemp(path.join(root, 'workspace-'));
+  const store = new TaskStore({ dataDir: path.join(root, 'data') });
+  const server = createServer({
+    store,
+    runnerOptions: {
+      command: process.execPath,
+      args: [path.resolve('scripts/fake-codex-runner.mjs')],
+      timeoutMs: 5000
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const subagents = await request(`${baseUrl}/api/subagents`);
+    assert.equal(subagents.some((subagent) => subagent.id === 'default' && subagent.label === 'Default'), true);
+
+    const created = await request(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      body: JSON.stringify({
+        title: 'Default mode API task',
+        description: 'Run default mode through HTTP',
+        workspacePath: workspace,
+        subagent: 'default',
+        notes: ''
+      })
+    });
+    assert.equal(created.status, 'Assigned');
+    assert.equal(created.subagent, 'default');
+
+    const detail = await request(`${baseUrl}/api/tasks/${created.id}`);
+    assert.equal(detail.subagent, 'default');
+
+    const run = await request(`${baseUrl}/api/tasks/${created.id}/run`, { method: 'POST' });
+    assert.equal(run.status, 'Done');
+    assert.ok(run.sessionRef);
+    assert.ok(run.processRef);
+
+    const prompt = await readFile(path.join(run.runArtifactPath, 'prompt.txt'), 'utf8');
+    assert.equal(prompt, 'Run default mode through HTTP');
+    assert.doesNotMatch(prompt, /Subagent:/);
+    assert.doesNotMatch(prompt, /harness_(planner|generator|plan_reviewer|evaluator)/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('HTTP API runs default codex command in the task workspace', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'codex-task-dispatch-api-default-'));
   const workspace = await mkdtemp(path.join(root, 'workspace-'));

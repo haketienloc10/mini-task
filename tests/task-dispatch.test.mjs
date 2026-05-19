@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -29,6 +29,35 @@ test('builds default codex exec command without deprecated cwd argument', async 
   assert.match(runner.stdin, /Task: Default command/);
   assert.equal(runner.args.includes('--cwd'), false);
   assert.equal(runner.args.includes('--prompt-file'), false);
+
+  await rm(root, { recursive: true, force: true });
+});
+
+test('builds plain prompt for default task mode', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codex-task-dispatch-default-prompt-'));
+  const workspace = await mkdtemp(path.join(root, 'workspace-'));
+  const runArtifactPath = path.join(root, 'run');
+
+  const runner = buildRunnerCommand({
+    title: 'Plain task',
+    description: 'Inspect files and report findings.',
+    workspacePath: workspace,
+    subagent: 'default',
+    notes: 'Keep it short.'
+  }, runArtifactPath);
+
+  assert.equal(runner.command, 'codex');
+  assert.deepEqual(runner.args, [
+    'exec',
+    '--full-auto',
+    '-'
+  ]);
+  assert.equal(runner.cwd, path.resolve(workspace));
+  assert.equal(runner.prompt, 'Inspect files and report findings.\n\nNotes:\nKeep it short.');
+  assert.equal(runner.stdin, runner.prompt);
+  assert.doesNotMatch(runner.prompt, /Subagent:/);
+  assert.doesNotMatch(runner.prompt, /harness_(planner|generator|plan_reviewer|evaluator)/);
+  assert.doesNotMatch(runner.prompt, /Task: Plain task/);
 
   await rm(root, { recursive: true, force: true });
 });
@@ -75,6 +104,39 @@ test('creates, runs, captures output, and isolates sessions per task', async () 
   assert.ok(firstResult.runArtifactPath);
   assert.ok(secondResult.runArtifactPath);
   assert.notEqual(firstResult.runArtifactPath, secondResult.runArtifactPath);
+
+  await rm(root, { recursive: true, force: true });
+});
+
+test('runs default task mode through an isolated session with plain prompt artifact', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codex-task-dispatch-default-run-'));
+  const workspace = await mkdtemp(path.join(root, 'workspace-'));
+  const store = new TaskStore({ dataDir: path.join(root, 'data') });
+  await store.init();
+
+  const task = await store.createTask({
+    title: 'Default task',
+    description: 'Run with a plain prompt.',
+    workspacePath: workspace,
+    subagent: 'default',
+    notes: ''
+  });
+
+  const result = await runTask(task, store, {
+    command: process.execPath,
+    args: [path.resolve('scripts/fake-codex-runner.mjs')],
+    timeoutMs: 5000
+  });
+
+  assert.equal(result.status, 'Done');
+  assert.ok(result.sessionRef);
+  assert.ok(result.processRef);
+  assert.ok(result.runArtifactPath);
+
+  const prompt = await readFile(path.join(result.runArtifactPath, 'prompt.txt'), 'utf8');
+  assert.equal(prompt, 'Run with a plain prompt.');
+  assert.doesNotMatch(prompt, /Subagent:/);
+  assert.doesNotMatch(prompt, /harness_(planner|generator|plan_reviewer|evaluator)/);
 
   await rm(root, { recursive: true, force: true });
 });

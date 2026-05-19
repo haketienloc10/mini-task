@@ -1,4 +1,5 @@
 export const SUBAGENTS = [
+  { id: 'default', label: 'Default', role: null },
   { id: 'planner', label: 'Planner', role: 'harness_planner' },
   { id: 'generator', label: 'Generator', role: 'harness_generator' },
   { id: 'reviewer', label: 'Reviewer', role: 'harness_plan_reviewer' },

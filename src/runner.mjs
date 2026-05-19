@@ -84,13 +84,7 @@ export function buildRunnerCommand(task, runArtifactPath, options = {}) {
   }
 
   const command = options.command ?? process.env.CODEX_TASK_COMMAND ?? 'codex';
-  const prompt = [
-    `Subagent: ${subagent.role}`,
-    `Task: ${task.title}`,
-    '',
-    task.description,
-    task.notes ? `\nNotes:\n${task.notes}` : ''
-  ].filter(Boolean).join('\n');
+  const prompt = buildPrompt(task, subagent);
 
   if (options.args) {
     return {
@@ -111,6 +105,23 @@ export function buildRunnerCommand(task, runArtifactPath, options = {}) {
     stdin: prompt,
     env: options.env ?? process.env
   };
+}
+
+function buildPrompt(task, subagent) {
+  if (subagent.id === 'default') {
+    return [
+      task.description,
+      task.notes ? `Notes:\n${task.notes}` : ''
+    ].filter(Boolean).join('\n\n');
+  }
+
+  return [
+    `Subagent: ${subagent.role}`,
+    `Task: ${task.title}`,
+    '',
+    task.description,
+    task.notes ? `\nNotes:\n${task.notes}` : ''
+  ].filter(Boolean).join('\n');
 }
 
 export function executeProcess(runner, timeoutMs) {

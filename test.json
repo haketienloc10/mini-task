@@ -1,8 +1,0 @@
-{
-    "errors": [
-        {
-            "code": "050002",
-            "message": "External service returned error in orderViewRS (code: [462] message: [PAYMENT FAILED])."
-        }
-    ]
-}
