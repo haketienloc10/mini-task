@@ -30,6 +30,7 @@ export async function runTask(task, store, options = {}) {
       command: runner.command,
       args: runner.args,
       cwd: runner.cwd,
+      stdin: runner.stdin ? '<prompt>' : null,
       sessionRef
     }, null, 2));
 
@@ -97,16 +98,17 @@ export function buildRunnerCommand(task, runArtifactPath, options = {}) {
       args: options.args,
       cwd: path.resolve(task.workspacePath),
       prompt,
+      stdin: options.stdin,
       env: options.env ?? process.env
     };
   }
 
-  const promptFile = path.join(runArtifactPath, 'prompt.txt');
   return {
     command,
-    args: ['exec', '--full-auto', '--cwd', path.resolve(task.workspacePath), '--prompt-file', promptFile],
+    args: ['exec', '--full-auto', '-'],
     cwd: path.resolve(task.workspacePath),
     prompt,
+    stdin: prompt,
     env: options.env ?? process.env
   };
 }
@@ -134,6 +136,11 @@ export function executeProcess(runner, timeoutMs) {
     child.stderr.on('data', (chunk) => {
       stderr += chunk.toString();
     });
+    if (runner.stdin) {
+      child.stdin.end(runner.stdin);
+    } else {
+      child.stdin.end();
+    }
     child.on('error', (error) => {
       clearTimeout(timer);
       reject(error);

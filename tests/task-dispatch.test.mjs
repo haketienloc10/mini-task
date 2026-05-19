@@ -4,7 +4,34 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { TaskStore } from '../src/taskStore.mjs';
-import { runTask } from '../src/runner.mjs';
+import { buildRunnerCommand, runTask } from '../src/runner.mjs';
+
+test('builds default codex exec command without deprecated cwd argument', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codex-task-dispatch-command-'));
+  const workspace = await mkdtemp(path.join(root, 'workspace-'));
+  const runArtifactPath = path.join(root, 'run');
+
+  const runner = buildRunnerCommand({
+    title: 'Default command',
+    description: 'Inspect default args',
+    workspacePath: workspace,
+    subagent: 'generator',
+    notes: ''
+  }, runArtifactPath);
+
+  assert.equal(runner.command, 'codex');
+  assert.deepEqual(runner.args, [
+    'exec',
+    '--full-auto',
+    '-'
+  ]);
+  assert.equal(runner.cwd, path.resolve(workspace));
+  assert.match(runner.stdin, /Task: Default command/);
+  assert.equal(runner.args.includes('--cwd'), false);
+  assert.equal(runner.args.includes('--prompt-file'), false);
+
+  await rm(root, { recursive: true, force: true });
+});
 
 test('creates, runs, captures output, and isolates sessions per task', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'codex-task-dispatch-'));
