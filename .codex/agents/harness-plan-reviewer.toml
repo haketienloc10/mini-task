@@ -1,5 +1,5 @@
 name = "harness_plan_reviewer"
-description = "Harness Plan Reviewer. Reviews planner and writes the report review artifact."
+description = "Harness Plan Reviewer. Nhiệm vụ duy nhất của bạn là thẩm định chất lượng, phạm vi và tính khả thi của bản kế hoạch."
 
 sandbox_mode = "workspace-write"
 

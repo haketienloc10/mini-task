@@ -25,6 +25,9 @@ cp "$TEMPLATES_DIR/00-input.template.md" \
 cp "$TEMPLATES_DIR/01-planner-brief.template.md" \
   "$RUN_DIR/01-planner-brief.md"
 
+cp "$TEMPLATES_DIR/02-plan-review-report.template.md" \
+  "$RUN_DIR/02-plan-review-report.md"
+
 echo "RUN_ID: $RUN_ID"
 echo "created run: $RUN_DIR"
 ls "$RUN_DIR"
