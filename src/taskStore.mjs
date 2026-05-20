@@ -8,17 +8,92 @@ export class TaskStore {
   constructor({ dataDir = path.resolve('data') } = {}) {
     this.dataDir = dataDir;
     this.tasksFile = path.join(dataDir, 'tasks.json');
+    this.projectsFile = path.join(dataDir, 'projects.json');
     this.runsDir = path.join(dataDir, 'runs');
   }
 
   async init() {
     await mkdir(this.runsDir, { recursive: true });
+    
+    // Initialize projects.json if not present
+    let projects = [];
     try {
-      await readFile(this.tasksFile, 'utf8');
+      const rawProjects = await readFile(this.projectsFile, 'utf8');
+      projects = JSON.parse(rawProjects);
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
+      await this.#writeProjects([]);
+    }
+
+    // Initialize tasks.json if not present, or migrate tasks
+    let tasks = [];
+    let tasksFileExists = true;
+    try {
+      const rawTasks = await readFile(this.tasksFile, 'utf8');
+      tasks = JSON.parse(rawTasks);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      tasksFileExists = false;
       await this.#writeTasks([]);
     }
+
+    // Migration and default project generation
+    if (tasksFileExists) {
+      const legacyTasks = tasks.filter(task => !task.projectId);
+      if (legacyTasks.length > 0) {
+        // Ensure default project exists
+        let defaultProj = projects.find(p => p.id === 'default-project');
+        if (!defaultProj) {
+          defaultProj = {
+            id: 'default-project',
+            name: 'Default Project',
+            description: 'Default project for migrated tasks'
+          };
+          projects.push(defaultProj);
+          await this.#writeProjects(projects);
+        }
+
+        // Migrate legacy tasks
+        let migrated = false;
+        for (const task of tasks) {
+          if (!task.projectId) {
+            task.projectId = 'default-project';
+            migrated = true;
+          }
+          if (!task.messages) {
+            task.messages = [];
+            migrated = true;
+          }
+        }
+        if (migrated) {
+          await this.#writeTasks(tasks);
+        }
+      }
+    }
+  }
+
+  async listProjects() {
+    return await this.#readProjects();
+  }
+
+  async getProject(id) {
+    const projects = await this.#readProjects();
+    return projects.find((project) => project.id === id) ?? null;
+  }
+
+  async createProject({ name, description = '' }) {
+    if (!name?.trim()) {
+      throw new Error('Project name is required');
+    }
+    const project = {
+      id: randomUUID(),
+      name: name.trim(),
+      description: description.trim()
+    };
+    const projects = await this.#readProjects();
+    projects.push(project);
+    await this.#writeProjects(projects);
+    return project;
   }
 
   async listTasks() {
@@ -32,9 +107,19 @@ export class TaskStore {
   }
 
   async createTask(input) {
+    if (!input.projectId) {
+      throw new Error('projectId is required');
+    }
+    const projects = await this.#readProjects();
+    const projectExists = projects.some(p => p.id === input.projectId);
+    if (!projectExists) {
+      throw new Error(`Project with ID ${input.projectId} does not exist`);
+    }
+
     const now = new Date().toISOString();
     const task = {
       id: randomUUID(),
+      projectId: input.projectId,
       title: input.title.trim(),
       description: input.description.trim(),
       workspacePath: input.workspacePath.trim(),
@@ -50,7 +135,8 @@ export class TaskStore {
       runArtifactPath: null,
       output: '',
       log: '',
-      error: ''
+      error: '',
+      messages: []
     };
     const tasks = await this.#readTasks();
     tasks.push(task);
@@ -99,4 +185,18 @@ export class TaskStore {
     await writeFile(tmpFile, `${JSON.stringify(tasks, null, 2)}\n`, 'utf8');
     await rename(tmpFile, this.tasksFile);
   }
+
+  async #readProjects() {
+    await this.init();
+    const raw = await readFile(this.projectsFile, 'utf8');
+    return JSON.parse(raw);
+  }
+
+  async #writeProjects(projects) {
+    await mkdir(this.dataDir, { recursive: true });
+    const tmpFile = `${this.projectsFile}.tmp`;
+    await writeFile(tmpFile, `${JSON.stringify(projects, null, 2)}\n`, 'utf8');
+    await rename(tmpFile, this.projectsFile);
+  }
 }
+

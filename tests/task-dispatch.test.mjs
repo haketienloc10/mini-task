@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -70,7 +70,10 @@ test('creates, runs, captures output, and isolates sessions per task', async () 
   const store = new TaskStore({ dataDir: path.join(root, 'data') });
   await store.init();
 
+  const project = await store.createProject({ name: 'Alpha Project' });
+
   const first = await store.createTask({
+    projectId: project.id,
     title: 'First task',
     description: 'Run first task',
     workspacePath: workspace,
@@ -78,6 +81,7 @@ test('creates, runs, captures output, and isolates sessions per task', async () 
     notes: ''
   });
   const second = await store.createTask({
+    projectId: project.id,
     title: 'Second task',
     description: 'Run second task',
     workspacePath: workspace,
@@ -116,7 +120,10 @@ test('runs default task mode through an isolated session with plain prompt artif
   const store = new TaskStore({ dataDir: path.join(root, 'data') });
   await store.init();
 
+  const project = await store.createProject({ name: 'Beta Project' });
+
   const task = await store.createTask({
+    projectId: project.id,
     title: 'Default task',
     description: 'Run with a plain prompt.',
     workspacePath: workspace,
@@ -148,7 +155,10 @@ test('marks task failed when workspace is invalid', async () => {
   const store = new TaskStore({ dataDir: path.join(root, 'data') });
   await store.init();
 
+  const project = await store.createProject({ name: 'Gamma Project' });
+
   const task = await store.createTask({
+    projectId: project.id,
     title: 'Bad workspace',
     description: 'Should fail',
     workspacePath: path.join(root, 'missing'),
@@ -176,7 +186,10 @@ test('marks task failed when runner exits with non-zero code', async () => {
   const store = new TaskStore({ dataDir: path.join(root, 'data') });
   await store.init();
 
+  const project = await store.createProject({ name: 'Delta Project' });
+
   const task = await store.createTask({
+    projectId: project.id,
     title: 'Runner failure',
     description: 'Should fail',
     workspacePath: workspace,
@@ -193,6 +206,54 @@ test('marks task failed when runner exits with non-zero code', async () => {
   assert.equal(result.status, 'Failed');
   assert.equal(result.error, 'Process exited with code 7');
   assert.match(result.log, /fake codex failure/);
+
+  await rm(root, { recursive: true, force: true });
+});
+
+test('TaskStore migrates legacy tasks and creates a default project', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codex-task-store-migration-'));
+  const dataDir = path.join(root, 'data');
+  await mkdir(dataDir, { recursive: true });
+
+  const legacyTasks = [
+    {
+      id: 'legacy-task-1',
+      title: 'Legacy Task 1',
+      description: 'First description',
+      workspacePath: root,
+      subagent: 'generator',
+      notes: '',
+      status: 'Assigned',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      startedAt: null,
+      finishedAt: null,
+      sessionRef: null,
+      processRef: null,
+      runArtifactPath: null,
+      output: '',
+      log: '',
+      error: ''
+    }
+  ];
+
+  await writeFile(path.join(dataDir, 'tasks.json'), JSON.stringify(legacyTasks, null, 2), 'utf8');
+
+  // Load and init store
+  const store = new TaskStore({ dataDir });
+  await store.init();
+
+  // Verify default project is created
+  const projects = await store.listProjects();
+  const defaultProj = projects.find(p => p.id === 'default-project');
+  assert.ok(defaultProj);
+  assert.equal(defaultProj.name, 'Default Project');
+
+  // Verify task is migrated
+  const tasks = await store.listTasks();
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].projectId, 'default-project');
+  assert.ok(Array.isArray(tasks[0].messages));
 
   await rm(root, { recursive: true, force: true });
 });

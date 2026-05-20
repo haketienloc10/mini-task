@@ -41,6 +41,15 @@ export async function runTask(task, store, options = {}) {
 
     const status = result.exitCode === 0 ? 'Done' : 'Failed';
     const error = result.exitCode === 0 ? '' : `Process exited with code ${result.exitCode}`;
+
+    const agentMessage = {
+      id: randomUUID(),
+      sender: 'agent',
+      content: result.stdout || error || 'Process completed with no output',
+      createdAt: finishedAt
+    };
+    const updatedMessages = [...(task.messages || []), agentMessage];
+
     return store.updateTask(task.id, {
       status,
       finishedAt,
@@ -52,17 +61,28 @@ export async function runTask(task, store, options = {}) {
         `Command ${runner.command}`,
         result.stderr ? `stderr:\n${result.stderr}` : ''
       ].filter(Boolean).join('\n'),
-      error
+      error,
+      messages: updatedMessages
     });
   } catch (error) {
     const finishedAt = new Date().toISOString();
     await store.writeRunFile(runArtifactPath, 'error.log', error.stack ?? error.message);
+
+    const agentMessage = {
+      id: randomUUID(),
+      sender: 'agent',
+      content: error.message,
+      createdAt: finishedAt
+    };
+    const updatedMessages = [...(task.messages || []), agentMessage];
+
     return store.updateTask(task.id, {
       status: 'Failed',
       finishedAt,
       output: '',
       log: `Started session ${sessionRef}\nFailed before completion`,
-      error: error.message
+      error: error.message,
+      messages: updatedMessages
     });
   }
 }
@@ -84,7 +104,7 @@ export function buildRunnerCommand(task, runArtifactPath, options = {}) {
   }
 
   const command = options.command ?? process.env.CODEX_TASK_COMMAND ?? 'codex';
-  const prompt = buildPrompt(task, subagent);
+  const prompt = options.customPrompt ?? buildPrompt(task, subagent);
 
   if (options.args) {
     return {
@@ -92,7 +112,7 @@ export function buildRunnerCommand(task, runArtifactPath, options = {}) {
       args: options.args,
       cwd: path.resolve(task.workspacePath),
       prompt,
-      stdin: options.stdin,
+      stdin: options.stdin !== undefined ? options.stdin : prompt,
       env: options.env ?? process.env
     };
   }

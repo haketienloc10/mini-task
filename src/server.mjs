@@ -2,6 +2,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import { TaskStore } from './taskStore.mjs';
 import { runTask } from './runner.mjs';
 import { findSubagent, SUBAGENTS } from './subagents.mjs';
@@ -19,6 +20,19 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
         return sendJson(res, 200, SUBAGENTS);
       }
 
+      if (req.method === 'GET' && url.pathname === '/api/projects') {
+        return sendJson(res, 200, await store.listProjects());
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/projects') {
+        const body = await readJson(req);
+        if (!body.name?.trim()) {
+          return sendJson(res, 400, { error: 'Project name is required' });
+        }
+        const project = await store.createProject(body);
+        return sendJson(res, 201, project);
+      }
+
       if (req.method === 'GET' && url.pathname === '/api/tasks') {
         return sendJson(res, 200, await store.listTasks());
       }
@@ -27,8 +41,12 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
         const body = await readJson(req);
         const validation = validateTaskInput(body);
         if (validation) return sendJson(res, 400, { error: validation });
-        const task = await store.createTask(body);
-        return sendJson(res, 201, task);
+        try {
+          const task = await store.createTask(body);
+          return sendJson(res, 201, task);
+        } catch (error) {
+          return sendJson(res, 400, { error: error.message });
+        }
       }
 
       const taskMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)$/);
@@ -43,7 +61,41 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
         const task = await store.getTask(runMatch[1]);
         if (!task) return sendJson(res, 404, { error: 'Task not found' });
         if (task.status === 'Running') return sendJson(res, 409, { error: 'Task is already running' });
-        const result = await runTask(task, store, runnerOptions);
+        
+        let body = {};
+        try {
+          body = await readJson(req);
+        } catch (e) {
+          // ignore
+        }
+        
+        let result;
+        if (body.prompt?.trim()) {
+          const userMessage = {
+            id: randomUUID(),
+            sender: 'user',
+            content: body.prompt.trim(),
+            createdAt: new Date().toISOString()
+          };
+          task.messages = [...(task.messages || []), userMessage];
+          await store.updateTask(task.id, { messages: task.messages });
+          result = await runTask(task, store, { ...runnerOptions, customPrompt: body.prompt.trim() });
+        } else {
+          if (!task.messages || task.messages.length === 0) {
+            const firstUserMsg = {
+              id: randomUUID(),
+              sender: 'user',
+              content: [task.description, task.notes].filter(Boolean).join('\n\n'),
+              createdAt: new Date().toISOString()
+            };
+            task.messages = [firstUserMsg];
+            await store.updateTask(task.id, { messages: task.messages });
+            result = await runTask(task, store, runnerOptions);
+          } else {
+            const lastUserMsg = [...task.messages].reverse().find(m => m.sender === 'user');
+            result = await runTask(task, store, { ...runnerOptions, customPrompt: lastUserMsg?.content });
+          }
+        }
         return sendJson(res, 200, result);
       }
 
@@ -61,6 +113,7 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
 
 function validateTaskInput(body) {
   if (!body || typeof body !== 'object') return 'Request body must be an object';
+  if (!body.projectId?.trim()) return 'Project ID is required';
   if (!body.title?.trim()) return 'Title is required';
   if (!body.description?.trim()) return 'Description is required';
   if (!body.workspacePath?.trim()) return 'Workspace path is required';

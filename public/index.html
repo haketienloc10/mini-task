@@ -3,29 +3,130 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Codex Task Dispatch</title>
+    <title>Codex Task Dispatch - Bảng điều phối tác vụ</title>
+    
+    <!-- SEO Meta Tags -->
+    <meta name="description" content="Bảng quản trị tác vụ Codex local chuyên nghiệp cho các lượt chạy Codex CLI một tác vụ một phiên. Quản lý, điều phối và chạy subagents hiệu quả với giao diện trực quan.">
+    <meta name="keywords" content="Codex, Task Dispatch, Subagents, Task Board, AI Development, Glassmorphism, Dark Mode, Web UI">
+    <meta name="theme-color" content="#0b0f19" id="meta-theme-color">
+    
+    <!-- Open Graph Metadata -->
+    <meta property="og:title" content="Codex Task Dispatch - Local Task Board">
+    <meta property="og:description" content="Quản lý, điều phối và chạy subagents hiệu quả với giao diện trực quan hiện đại.">
+    <meta property="og:type" content="website">
+    
+    <!-- Google Fonts Preconnect and Links -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Stylesheet -->
     <link rel="stylesheet" href="/styles.css">
+    
+    <!-- Theme Switch Script (Immediate execution to prevent page flash) -->
+    <script>
+      (function() {
+        const savedTheme = localStorage.getItem('theme') || 'dark';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+        const themeColor = savedTheme === 'dark' ? '#0b0f19' : '#f3f6fa';
+        document.querySelector('meta[name="theme-color"]')?.setAttribute('content', themeColor);
+      })();
+    </script>
   </head>
   <body>
+    <!-- Floating background glow blobs for Glassmorphism depth -->
+    <div class="bg-glow-blobs" aria-hidden="true">
+      <div class="blob blob-1"></div>
+      <div class="blob blob-2"></div>
+    </div>
+
     <main class="app">
-      <section class="toolbar">
+      <header class="toolbar">
         <div>
           <h1>Codex Task Dispatch</h1>
           <p>Local task board for one-task-one-session Codex CLI runs.</p>
         </div>
-        <button id="refreshButton" type="button">Refresh</button>
-      </section>
+        <div class="toolbar-actions">
+          <button id="themeToggle" type="button" class="theme-toggle" aria-label="Chuyển chế độ màu">
+            <span class="theme-icon">🌙</span>
+            <span class="theme-text">Dark Mode</span>
+          </button>
+          <button id="refreshButton" type="button">Refresh</button>
+        </div>
+      </header>
 
       <section class="layout">
-        <form id="taskForm" class="panel">
-          <h2>Create task</h2>
+        <!-- Cột 1: Projects Panel -->
+        <section class="panel projects-panel">
+          <div class="section-header">
+            <h2>Projects</h2>
+            <button id="newProjectBtn" type="button">New Project</button>
+          </div>
+          <div id="projectList" class="project-list"></div>
+        </section>
+
+        <!-- Cột 2: Tasks Panel -->
+        <section class="panel list-panel">
+          <div class="section-header">
+            <h2>Tasks</h2>
+            <button id="newTaskBtn" type="button">New Task</button>
+          </div>
+          <div id="taskList" class="task-list"></div>
+        </section>
+
+        <!-- Cột 3: Chat Detail Panel -->
+        <section class="panel detail-panel">
+          <div class="section-header">
+            <h2 id="detailTitle">Task Chat</h2>
+          </div>
+          <div id="chatArea" class="chat-area empty">
+            Select a task to start chatting.
+          </div>
+          <div id="chatInputArea" class="chat-input-area" style="display: none;">
+            <textarea id="chatInput" placeholder="Nhập tin nhắn để gửi subagent..." rows="2"></textarea>
+            <button id="sendChatBtn" type="button">Send</button>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <!-- New Project Modal -->
+    <div id="projectModal" class="modal">
+      <div class="modal-content">
+        <span class="close-modal" id="closeProjectModal">&times;</span>
+        <form id="projectForm">
+          <h2>Create Project</h2>
+          <label>
+            Project Name
+            <input name="name" required maxlength="100">
+          </label>
+          <label>
+            Description
+            <textarea name="description" rows="3"></textarea>
+          </label>
+          <button type="submit">Create</button>
+          <p id="projectFormMessage" class="message" role="status"></p>
+        </form>
+      </div>
+    </div>
+
+    <!-- New Task Modal -->
+    <div id="taskModal" class="modal">
+      <div class="modal-content">
+        <span class="close-modal" id="closeTaskModal">&times;</span>
+        <form id="taskForm">
+          <h2>Create Task</h2>
+          <label>
+            Project
+            <select name="projectId" id="taskProjectSelect" required></select>
+          </label>
           <label>
             Title
             <input name="title" required maxlength="120">
           </label>
           <label>
             Description
-            <textarea name="description" required rows="6"></textarea>
+            <textarea name="description" required rows="4"></textarea>
           </label>
           <label>
             Workspace path
@@ -33,33 +134,54 @@
           </label>
           <label>
             Subagent
-            <select name="subagent" required></select>
+            <select name="subagent" id="taskSubagentSelect" required></select>
           </label>
           <label>
             Notes
-            <textarea name="notes" rows="3"></textarea>
+            <textarea name="notes" rows="2"></textarea>
           </label>
           <button type="submit">Create</button>
           <p id="formMessage" class="message" role="status"></p>
         </form>
-
-        <section class="panel list-panel">
-          <div class="section-header">
-            <h2>Tasks</h2>
-            <span id="taskCount">0</span>
-          </div>
-          <div id="taskList" class="task-list"></div>
-        </section>
-
-        <section class="panel detail-panel">
-          <div class="section-header">
-            <h2>Task detail</h2>
-            <button id="runButton" type="button" disabled>Run</button>
-          </div>
-          <div id="taskDetail" class="empty">Select a task.</div>
-        </section>
-      </section>
-    </main>
+      </div>
+    </div>
+    
     <script type="module" src="/app.js"></script>
+    
+    <!-- Theme Toggle Interaction Script -->
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        const themeToggle = document.getElementById('themeToggle');
+        const themeIcon = themeToggle.querySelector('.theme-icon');
+        const themeText = themeToggle.querySelector('.theme-text');
+        const metaThemeColor = document.getElementById('meta-theme-color');
+
+        function updateToggleUI(theme) {
+          if (theme === 'dark') {
+            themeIcon.textContent = '🌙';
+            themeText.textContent = 'Dark Mode';
+            if (metaThemeColor) metaThemeColor.setAttribute('content', '#0b0f19');
+          } else {
+            themeIcon.textContent = '☀️';
+            themeText.textContent = 'Light Mode';
+            if (metaThemeColor) metaThemeColor.setAttribute('content', '#f3f6fa');
+          }
+        }
+
+        // Initial setup
+        const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+        updateToggleUI(currentTheme);
+
+        // Toggle theme handler
+        themeToggle.addEventListener('click', () => {
+          const activeTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+          const newTheme = activeTheme === 'dark' ? 'light' : 'dark';
+          
+          document.documentElement.setAttribute('data-theme', newTheme);
+          localStorage.setItem('theme', newTheme);
+          updateToggleUI(newTheme);
+        });
+      });
+    </script>
   </body>
 </html>
