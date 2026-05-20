@@ -23,8 +23,9 @@ export async function runTask(task, store, options = {}) {
   });
 
   try {
-    await validateWorkspacePath(task.workspacePath);
-    const runner = buildRunnerCommand(task, runArtifactPath, options);
+    const workspacePath = await resolveTaskWorkspacePath(task, store);
+    await validateWorkspacePath(workspacePath);
+    const runner = buildRunnerCommand({ ...task, workspacePath }, runArtifactPath, options);
     await store.writeRunFile(runArtifactPath, 'prompt.txt', runner.prompt);
     await store.writeRunFile(runArtifactPath, 'command.json', JSON.stringify({
       command: runner.command,
@@ -95,6 +96,19 @@ export async function validateWorkspacePath(workspacePath) {
     throw new Error('Workspace path must be an existing directory');
   }
   return resolved;
+}
+
+async function resolveTaskWorkspacePath(task, store) {
+  if (task.projectId && typeof store.getProject === 'function') {
+    const project = await store.getProject(task.projectId);
+    if (project?.workspacePath?.trim()) {
+      return project.workspacePath.trim();
+    }
+  }
+  if (task.workspacePath?.trim()) {
+    return task.workspacePath.trim();
+  }
+  throw new Error('Workspace path is required');
 }
 
 export function buildRunnerCommand(task, runArtifactPath, options = {}) {

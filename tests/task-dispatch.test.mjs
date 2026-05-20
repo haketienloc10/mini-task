@@ -70,13 +70,12 @@ test('creates, runs, captures output, and isolates sessions per task', async () 
   const store = new TaskStore({ dataDir: path.join(root, 'data') });
   await store.init();
 
-  const project = await store.createProject({ name: 'Alpha Project' });
+  const project = await store.createProject({ name: 'Alpha Project', workspacePath: workspace });
 
   const first = await store.createTask({
     projectId: project.id,
     title: 'First task',
     description: 'Run first task',
-    workspacePath: workspace,
     subagent: 'generator',
     notes: ''
   });
@@ -84,7 +83,6 @@ test('creates, runs, captures output, and isolates sessions per task', async () 
     projectId: project.id,
     title: 'Second task',
     description: 'Run second task',
-    workspacePath: workspace,
     subagent: 'reviewer',
     notes: ''
   });
@@ -120,13 +118,12 @@ test('runs default task mode through an isolated session with plain prompt artif
   const store = new TaskStore({ dataDir: path.join(root, 'data') });
   await store.init();
 
-  const project = await store.createProject({ name: 'Beta Project' });
+  const project = await store.createProject({ name: 'Beta Project', workspacePath: workspace });
 
   const task = await store.createTask({
     projectId: project.id,
     title: 'Default task',
     description: 'Run with a plain prompt.',
-    workspacePath: workspace,
     subagent: 'default',
     notes: ''
   });
@@ -155,13 +152,12 @@ test('marks task failed when workspace is invalid', async () => {
   const store = new TaskStore({ dataDir: path.join(root, 'data') });
   await store.init();
 
-  const project = await store.createProject({ name: 'Gamma Project' });
+  const project = await store.createProject({ name: 'Gamma Project', workspacePath: path.join(root, 'missing') });
 
   const task = await store.createTask({
     projectId: project.id,
     title: 'Bad workspace',
     description: 'Should fail',
-    workspacePath: path.join(root, 'missing'),
     subagent: 'planner',
     notes: ''
   });
@@ -186,13 +182,12 @@ test('marks task failed when runner exits with non-zero code', async () => {
   const store = new TaskStore({ dataDir: path.join(root, 'data') });
   await store.init();
 
-  const project = await store.createProject({ name: 'Delta Project' });
+  const project = await store.createProject({ name: 'Delta Project', workspacePath: workspace });
 
   const task = await store.createTask({
     projectId: project.id,
     title: 'Runner failure',
     description: 'Should fail',
-    workspacePath: workspace,
     subagent: 'evaluator',
     notes: ''
   });
@@ -248,12 +243,43 @@ test('TaskStore migrates legacy tasks and creates a default project', async () =
   const defaultProj = projects.find(p => p.id === 'default-project');
   assert.ok(defaultProj);
   assert.equal(defaultProj.name, 'Default Project');
+  assert.equal(defaultProj.workspacePath, root);
 
   // Verify task is migrated
   const tasks = await store.listTasks();
   assert.equal(tasks.length, 1);
   assert.equal(tasks[0].projectId, 'default-project');
   assert.ok(Array.isArray(tasks[0].messages));
+
+  await rm(root, { recursive: true, force: true });
+});
+
+test('runTask uses the project workspace instead of task-level workspace', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codex-task-project-workspace-'));
+  const projectWorkspace = await mkdtemp(path.join(root, 'project-workspace-'));
+  const taskWorkspace = await mkdtemp(path.join(root, 'task-workspace-'));
+  const store = new TaskStore({ dataDir: path.join(root, 'data') });
+  await store.init();
+
+  const project = await store.createProject({ name: 'Project Workspace', workspacePath: projectWorkspace });
+  const task = await store.createTask({
+    projectId: project.id,
+    title: 'Uses project cwd',
+    description: 'Run in project workspace',
+    workspacePath: taskWorkspace,
+    subagent: 'generator',
+    notes: ''
+  });
+
+  const result = await runTask(task, store, {
+    command: process.execPath,
+    args: [path.resolve('scripts/fake-codex-runner.mjs')],
+    timeoutMs: 5000
+  });
+
+  assert.equal(result.status, 'Done');
+  const commandArtifact = JSON.parse(await readFile(path.join(result.runArtifactPath, 'command.json'), 'utf8'));
+  assert.equal(commandArtifact.cwd, path.resolve(projectWorkspace));
 
   await rm(root, { recursive: true, force: true });
 });

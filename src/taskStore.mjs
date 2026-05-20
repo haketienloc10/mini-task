@@ -40,6 +40,14 @@ export class TaskStore {
     // Migration and default project generation
     if (tasksFileExists) {
       const legacyTasks = tasks.filter(task => !task.projectId);
+      const workspaceByProjectId = new Map();
+      for (const task of tasks) {
+        if (task.projectId && task.workspacePath?.trim() && !workspaceByProjectId.has(task.projectId)) {
+          workspaceByProjectId.set(task.projectId, task.workspacePath.trim());
+        }
+      }
+      let projectsMigrated = false;
+
       if (legacyTasks.length > 0) {
         // Ensure default project exists
         let defaultProj = projects.find(p => p.id === 'default-project');
@@ -47,10 +55,17 @@ export class TaskStore {
           defaultProj = {
             id: 'default-project',
             name: 'Default Project',
-            description: 'Default project for migrated tasks'
+            description: 'Default project for migrated tasks',
+            workspacePath: legacyTasks.find(task => task.workspacePath?.trim())?.workspacePath.trim() ?? ''
           };
           projects.push(defaultProj);
-          await this.#writeProjects(projects);
+          projectsMigrated = true;
+        } else if (!defaultProj.workspacePath?.trim()) {
+          const legacyWorkspacePath = legacyTasks.find(task => task.workspacePath?.trim())?.workspacePath.trim();
+          if (legacyWorkspacePath) {
+            defaultProj.workspacePath = legacyWorkspacePath;
+            projectsMigrated = true;
+          }
         }
 
         // Migrate legacy tasks
@@ -69,6 +84,20 @@ export class TaskStore {
           await this.#writeTasks(tasks);
         }
       }
+
+      for (const project of projects) {
+        const workspacePath = workspaceByProjectId.get(project.id);
+        if (!project.workspacePath?.trim() && workspacePath) {
+          project.workspacePath = workspacePath;
+          projectsMigrated = true;
+        } else if (project.workspacePath?.trim() && project.workspacePath !== project.workspacePath.trim()) {
+          project.workspacePath = project.workspacePath.trim();
+          projectsMigrated = true;
+        }
+      }
+      if (projectsMigrated) {
+        await this.#writeProjects(projects);
+      }
     }
   }
 
@@ -81,14 +110,18 @@ export class TaskStore {
     return projects.find((project) => project.id === id) ?? null;
   }
 
-  async createProject({ name, description = '' }) {
+  async createProject({ name, description = '', workspacePath }) {
     if (!name?.trim()) {
       throw new Error('Project name is required');
+    }
+    if (!workspacePath?.trim()) {
+      throw new Error('Workspace path is required');
     }
     const project = {
       id: randomUUID(),
       name: name.trim(),
-      description: description.trim()
+      description: description.trim(),
+      workspacePath: workspacePath.trim()
     };
     const projects = await this.#readProjects();
     projects.push(project);
@@ -122,7 +155,6 @@ export class TaskStore {
       projectId: input.projectId,
       title: input.title.trim(),
       description: input.description.trim(),
-      workspacePath: input.workspacePath.trim(),
       subagent: input.subagent,
       notes: input.notes?.trim() ?? '',
       status: 'Assigned',
@@ -199,4 +231,3 @@ export class TaskStore {
     await rename(tmpFile, this.projectsFile);
   }
 }
-

@@ -161,6 +161,7 @@ function renderProjects() {
       <button class="project-item ${p.id === state.selectedProjectId ? 'active' : ''}" data-project-id="${p.id}" type="button">
         <strong>${escapeHtml(p.name)}</strong>
         <p>${escapeHtml(p.description || 'No description')}</p>
+        <span class="task-meta">${escapeHtml(p.workspacePath || 'No workspace')}</span>
       </button>
     `).join('')
     : '<p class="empty">No projects yet.</p>';
@@ -188,7 +189,7 @@ function renderTasks() {
       <button class="task-item ${task.id === state.selectedTaskId ? 'active' : ''}" data-task-id="${task.id}" type="button">
         <strong>${escapeHtml(task.title)}</strong>
         <span class="status ${task.status}">${task.status}</span>
-        <span class="task-meta">${agentLabel(task.subagent)} · ${escapeHtml(task.workspacePath)}</span>
+        <span class="task-meta">${agentLabel(task.subagent)} · ${escapeHtml(workspaceForTask(task))}</span>
         <span class="task-meta">Updated ${formatDate(task.updatedAt)}</span>
       </button>
     `).join('')
@@ -237,7 +238,7 @@ function renderChat() {
       <div class="empty-chat-hint" style="padding: 20px; color: hsl(var(--text-secondary)); text-align: left;">
         <p style="margin-bottom: 8px;"><strong>Nhiệm vụ:</strong> ${escapeHtml(task.title)}</p>
         <p style="margin-bottom: 8px;"><strong>Subagent:</strong> ${agentLabel(task.subagent)}</p>
-        <p style="margin-bottom: 8px;"><strong>Workspace:</strong> <code>${escapeHtml(task.workspacePath)}</code></p>
+        <p style="margin-bottom: 8px;"><strong>Workspace:</strong> <code>${escapeHtml(workspaceForTask(task))}</code></p>
         <p style="margin-bottom: 12px; border-left: 3px solid var(--glass-border); padding-left: 10px; font-style: italic;">
           "${escapeHtml(task.description)}"
         </p>
@@ -307,6 +308,10 @@ async function api(path, options = {}) {
 
 function agentLabel(id) {
   return state.subagents.find((subagent) => subagent.id === id)?.label ?? id;
+}
+
+function workspaceForTask(task) {
+  return state.projects.find((project) => project.id === task.projectId)?.workspacePath ?? task.workspacePath ?? '';
 }
 
 function formatDate(value) {

@@ -29,6 +29,9 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
         if (!body.name?.trim()) {
           return sendJson(res, 400, { error: 'Project name is required' });
         }
+        if (!body.workspacePath?.trim()) {
+          return sendJson(res, 400, { error: 'Workspace path is required' });
+        }
         const project = await store.createProject(body);
         return sendJson(res, 201, project);
       }
@@ -116,7 +119,6 @@ function validateTaskInput(body) {
   if (!body.projectId?.trim()) return 'Project ID is required';
   if (!body.title?.trim()) return 'Title is required';
   if (!body.description?.trim()) return 'Description is required';
-  if (!body.workspacePath?.trim()) return 'Workspace path is required';
   if (!findSubagent(body.subagent)) return 'Subagent is required';
   return null;
 }

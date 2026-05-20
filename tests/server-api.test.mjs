@@ -25,9 +25,10 @@ test('HTTP API creates, lists, details, and runs a task', async () => {
   try {
     const project = await request(`${baseUrl}/api/projects`, {
       method: 'POST',
-      body: JSON.stringify({ name: 'API Project', description: 'Test' })
+      body: JSON.stringify({ name: 'API Project', description: 'Test', workspacePath: `  ${workspace}  ` })
     });
     assert.ok(project.id);
+    assert.equal(project.workspacePath, workspace);
 
     const created = await request(`${baseUrl}/api/tasks`, {
       method: 'POST',
@@ -35,7 +36,6 @@ test('HTTP API creates, lists, details, and runs a task', async () => {
         projectId: project.id,
         title: 'API task',
         description: 'Run through HTTP',
-        workspacePath: workspace,
         subagent: 'generator',
         notes: 'smoke'
       })
@@ -48,7 +48,7 @@ test('HTTP API creates, lists, details, and runs a task', async () => {
 
     const detail = await request(`${baseUrl}/api/tasks/${created.id}`);
     assert.equal(detail.subagent, 'generator');
-    assert.equal(detail.workspacePath, workspace);
+    assert.equal(detail.workspacePath, undefined);
 
     const run = await request(`${baseUrl}/api/tasks/${created.id}/run`, { method: 'POST' });
     assert.equal(run.status, 'Done');
@@ -85,7 +85,7 @@ test('HTTP API exposes, accepts, and runs default task mode', async () => {
 
     const project = await request(`${baseUrl}/api/projects`, {
       method: 'POST',
-      body: JSON.stringify({ name: 'Default Project', description: 'Test default' })
+      body: JSON.stringify({ name: 'Default Project', description: 'Test default', workspacePath: workspace })
     });
     assert.ok(project.id);
 
@@ -95,7 +95,6 @@ test('HTTP API exposes, accepts, and runs default task mode', async () => {
         projectId: project.id,
         title: 'Default mode API task',
         description: 'Run default mode through HTTP',
-        workspacePath: workspace,
         subagent: 'default',
         notes: ''
       })
@@ -155,7 +154,7 @@ test('HTTP API runs default codex command in the task workspace', async () => {
   try {
     const project = await request(`${baseUrl}/api/projects`, {
       method: 'POST',
-      body: JSON.stringify({ name: 'Runner Project', description: 'Test runner' })
+      body: JSON.stringify({ name: 'Runner Project', description: 'Test runner', workspacePath: workspace })
     });
     assert.ok(project.id);
 
@@ -165,7 +164,7 @@ test('HTTP API runs default codex command in the task workspace', async () => {
         projectId: project.id,
         title: 'Default runner API task',
         description: 'Run default command path through HTTP',
-        workspacePath: workspace,
+        workspacePath: path.join(root, 'client-controlled-workspace'),
         subagent: 'generator',
         notes: ''
       })
@@ -216,11 +215,12 @@ test('HTTP API projects management', async () => {
     // 2. Create project
     const proj = await request(`${baseUrl}/api/projects`, {
       method: 'POST',
-      body: JSON.stringify({ name: 'Project Alpha', description: 'Alpha test project' })
+      body: JSON.stringify({ name: 'Project Alpha', description: 'Alpha test project', workspacePath: ` ${root} ` })
     });
     assert.ok(proj.id);
     assert.equal(proj.name, 'Project Alpha');
     assert.equal(proj.description, 'Alpha test project');
+    assert.equal(proj.workspacePath, root);
 
     // 3. List contains created project
     const currentProjects = await request(`${baseUrl}/api/projects`);
@@ -230,24 +230,31 @@ test('HTTP API projects management', async () => {
     const invalidProjRes = await fetch(`${baseUrl}/api/projects`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: '' })
+      body: JSON.stringify({ name: '', workspacePath: root })
     });
     assert.equal(invalidProjRes.status, 400);
 
-    // 5. Validation: createTask requires projectId
+    // 5. Validation: project workspacePath is required
+    const invalidProjWorkspaceRes = await fetch(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Missing workspace', workspacePath: ' ' })
+    });
+    assert.equal(invalidProjWorkspaceRes.status, 400);
+
+    // 6. Validation: createTask requires projectId
     const invalidTaskRes1 = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         title: 'Task without project',
         description: 'Test validation',
-        workspacePath: root,
         subagent: 'generator'
       })
     });
     assert.equal(invalidTaskRes1.status, 400);
 
-    // 6. Validation: createTask requires valid projectId
+    // 7. Validation: createTask requires valid projectId
     const invalidTaskRes2 = await fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -255,7 +262,6 @@ test('HTTP API projects management', async () => {
         projectId: 'non-existent-id',
         title: 'Task with bad project',
         description: 'Test validation',
-        workspacePath: root,
         subagent: 'generator'
       })
     });
@@ -285,7 +291,7 @@ test('HTTP API chat session interaction', async () => {
   try {
     const project = await request(`${baseUrl}/api/projects`, {
       method: 'POST',
-      body: JSON.stringify({ name: 'Chat Project', description: 'Testing chat history' })
+      body: JSON.stringify({ name: 'Chat Project', description: 'Testing chat history', workspacePath: workspace })
     });
 
     const createdTask = await request(`${baseUrl}/api/tasks`, {
@@ -294,7 +300,6 @@ test('HTTP API chat session interaction', async () => {
         projectId: project.id,
         title: 'Chat task',
         description: 'First instruction',
-        workspacePath: workspace,
         subagent: 'generator',
         notes: 'Some notes'
       })
