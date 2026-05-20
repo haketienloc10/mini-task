@@ -1,1 +1,0 @@
-hiện tại đã có chức năng tạo project, nhưng khi tạo task lại chọn workspace path riêng được. điều này là không đúng với yêu cầu task trong project. đường dẫn workspace nên nằm trong project. hãy kiểm tra những điểm còn sai sót.
