@@ -8,17 +8,16 @@ const DEFAULT_TIMEOUT_MS = Number(process.env.CODEX_TASK_TIMEOUT_MS ?? 120000);
 
 export async function runTask(task, store, options = {}) {
   const startedAt = new Date().toISOString();
-  const sessionRef = randomUUID();
-  const runArtifactPath = await store.createRunArtifact(task.id, sessionRef);
+  const runRef = randomUUID();
+  const runArtifactPath = await store.createRunArtifact(task.id, runRef);
   await store.updateTask(task.id, {
     status: 'Running',
     startedAt,
     finishedAt: null,
-    sessionRef,
     processRef: null,
     runArtifactPath,
     output: '',
-    log: `Started session ${sessionRef}\n`,
+    log: task.sessionRef ? `Resuming session ${task.sessionRef}\n` : 'Starting new session\n',
     error: ''
   });
 
@@ -32,16 +31,18 @@ export async function runTask(task, store, options = {}) {
       args: runner.args,
       cwd: runner.cwd,
       stdin: runner.stdin ? '<prompt>' : null,
-      sessionRef
+      sessionRef: task.sessionRef ?? null,
+      runRef
     }, null, 2));
 
     const result = await executeProcess(runner, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     const finishedAt = new Date().toISOString();
-    await store.writeRunFile(runArtifactPath, 'stdout.log', result.stdout);
+    await store.writeRunFile(runArtifactPath, 'stdout.log', result.rawStdout ?? result.stdout);
     await store.writeRunFile(runArtifactPath, 'stderr.log', result.stderr);
 
     const status = result.exitCode === 0 ? 'Done' : 'Failed';
     const error = result.exitCode === 0 ? '' : `Process exited with code ${result.exitCode}`;
+    const sessionRef = result.sessionRef ?? task.sessionRef ?? runRef;
 
     const agentMessage = {
       id: randomUUID(),
@@ -54,10 +55,11 @@ export async function runTask(task, store, options = {}) {
     return store.updateTask(task.id, {
       status,
       finishedAt,
+      sessionRef,
       processRef: result.processRef,
       output: result.stdout,
       log: [
-        `Started session ${sessionRef}`,
+        task.sessionRef ? `Resumed session ${task.sessionRef}` : `Started session ${sessionRef}`,
         `Process reference ${result.processRef}`,
         `Command ${runner.command}`,
         result.stderr ? `stderr:\n${result.stderr}` : ''
@@ -80,8 +82,9 @@ export async function runTask(task, store, options = {}) {
     return store.updateTask(task.id, {
       status: 'Failed',
       finishedAt,
+      sessionRef: task.sessionRef ?? runRef,
       output: '',
-      log: `Started session ${sessionRef}\nFailed before completion`,
+      log: `${task.sessionRef ? `Resuming session ${task.sessionRef}` : 'Starting new session'}\nFailed before completion`,
       error: error.message,
       messages: updatedMessages
     });
@@ -131,13 +134,18 @@ export function buildRunnerCommand(task, runArtifactPath, options = {}) {
     };
   }
 
+  const args = task.sessionRef
+    ? ['exec', '--sandbox', 'workspace-write', '--json', 'resume', task.sessionRef, '-']
+    : ['exec', '--sandbox', 'workspace-write', '--json', '-'];
+
   return {
     command,
-    args: ['exec', '--sandbox', 'workspace-write', '-'],
+    args,
     cwd: path.resolve(task.workspacePath),
     prompt,
     stdin: prompt,
-    env: options.env ?? process.env
+    env: options.env ?? process.env,
+    parseJsonOutput: true
   };
 }
 
@@ -196,7 +204,45 @@ export function executeProcess(runner, timeoutMs) {
         reject(new Error(`Process timed out after ${timeoutMs}ms`));
         return;
       }
-      resolve({ exitCode, stdout, stderr, processRef });
+      if (!runner.parseJsonOutput) {
+        resolve({ exitCode, stdout, stderr, processRef });
+        return;
+      }
+
+      const parsed = parseCodexJsonOutput(stdout);
+      resolve({
+        exitCode,
+        stdout: parsed.finalMessage || stdout,
+        rawStdout: stdout,
+        stderr,
+        processRef,
+        sessionRef: parsed.sessionRef
+      });
     });
   });
+}
+
+export function parseCodexJsonOutput(stdout) {
+  let sessionRef = null;
+  let finalMessage = '';
+
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    if (event.type === 'thread.started' && typeof event.thread_id === 'string') {
+      sessionRef = event.thread_id;
+    }
+
+    if (event.type === 'item.completed' && event.item?.type === 'agent_message') {
+      finalMessage = event.item.text ?? finalMessage;
+    }
+  }
+
+  return { sessionRef, finalMessage };
 }

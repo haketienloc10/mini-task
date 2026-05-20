@@ -181,6 +181,7 @@ test('HTTP API runs default codex command in the task workspace', async () => {
       'exec',
       '--sandbox',
       'workspace-write',
+      '--json',
       '-'
     ]);
     assert.equal(observed.cwd, path.resolve(workspace));
@@ -339,6 +340,81 @@ test('HTTP API chat session interaction', async () => {
     // Verify the prompt sent to the runner for the second run was only 'Follow-up question'
     const prompt2 = await readFile(path.join(runResult2.runArtifactPath, 'prompt.txt'), 'utf8');
     assert.equal(prompt2, 'Follow-up question');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('HTTP API resumes the existing codex session for follow-up chat', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codex-task-session-resume-'));
+  const workspace = await mkdtemp(path.join(root, 'workspace-'));
+  const command = path.join(root, 'codex-json-shim.mjs');
+  const argsLog = path.join(root, 'args.jsonl');
+  const sessionId = '019e44d7-f572-7223-9008-ff923821c88e';
+
+  await writeFile(command, [
+    '#!/usr/bin/env node',
+    'import { appendFileSync } from "node:fs";',
+    `appendFileSync(${JSON.stringify(argsLog)}, JSON.stringify(process.argv.slice(2)) + "\\n");`,
+    `console.log(JSON.stringify({ type: "thread.started", thread_id: ${JSON.stringify(sessionId)} }));`,
+    'console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "shim final output" } }));'
+  ].join('\n'), 'utf8');
+  await chmod(command, 0o755);
+
+  const store = new TaskStore({ dataDir: path.join(root, 'data') });
+  const server = createServer({
+    store,
+    runnerOptions: {
+      command,
+      timeoutMs: 5000
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const project = await request(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      body: JSON.stringify({ name: 'Resume Project', workspacePath: workspace })
+    });
+    const task = await request(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      body: JSON.stringify({
+        projectId: project.id,
+        title: 'Resume task',
+        description: 'Start session',
+        subagent: 'default',
+        notes: ''
+      })
+    });
+
+    const firstRun = await request(`${baseUrl}/api/tasks/${task.id}/run`, { method: 'POST' });
+    assert.equal(firstRun.sessionRef, sessionId);
+    assert.equal(firstRun.output, 'shim final output');
+
+    const secondRun = await request(`${baseUrl}/api/tasks/${task.id}/run`, {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'Follow up' })
+    });
+    assert.equal(secondRun.sessionRef, sessionId);
+
+    const invocations = (await readFile(argsLog, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+
+    assert.deepEqual(invocations[0], ['exec', '--sandbox', 'workspace-write', '--json', '-']);
+    assert.deepEqual(invocations[1], [
+      'exec',
+      '--sandbox',
+      'workspace-write',
+      '--json',
+      'resume',
+      sessionId,
+      '-'
+    ]);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await rm(root, { recursive: true, force: true });

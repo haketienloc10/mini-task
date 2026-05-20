@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { TaskStore } from '../src/taskStore.mjs';
-import { buildRunnerCommand, runTask } from '../src/runner.mjs';
+import { buildRunnerCommand, parseCodexJsonOutput, runTask } from '../src/runner.mjs';
 
 test('builds default codex exec command without deprecated cwd argument', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'codex-task-dispatch-command-'));
@@ -24,6 +24,7 @@ test('builds default codex exec command without deprecated cwd argument', async 
     'exec',
     '--sandbox',
     'workspace-write',
+    '--json',
     '-'
   ]);
   assert.equal(runner.cwd, path.resolve(workspace));
@@ -52,6 +53,7 @@ test('builds plain prompt for default task mode', async () => {
     'exec',
     '--sandbox',
     'workspace-write',
+    '--json',
     '-'
   ]);
   assert.equal(runner.cwd, path.resolve(workspace));
@@ -62,6 +64,47 @@ test('builds plain prompt for default task mode', async () => {
   assert.doesNotMatch(runner.prompt, /Task: Plain task/);
 
   await rm(root, { recursive: true, force: true });
+});
+
+test('builds codex exec resume command when task has a session ref', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codex-task-dispatch-resume-command-'));
+  const workspace = await mkdtemp(path.join(root, 'workspace-'));
+  const runArtifactPath = path.join(root, 'run');
+
+  const runner = buildRunnerCommand({
+    title: 'Follow up',
+    description: 'Continue the prior task.',
+    workspacePath: workspace,
+    subagent: 'default',
+    notes: '',
+    sessionRef: '019e44d7-f572-7223-9008-ff923821c88e'
+  }, runArtifactPath, { customPrompt: 'Next message' });
+
+  assert.deepEqual(runner.args, [
+    'exec',
+    '--sandbox',
+    'workspace-write',
+    '--json',
+    'resume',
+    '019e44d7-f572-7223-9008-ff923821c88e',
+    '-'
+  ]);
+  assert.equal(runner.stdin, 'Next message');
+  assert.equal(runner.parseJsonOutput, true);
+
+  await rm(root, { recursive: true, force: true });
+});
+
+test('parses codex json output session and final message', () => {
+  const output = [
+    JSON.stringify({ type: 'thread.started', thread_id: '019e44d7-f572-7223-9008-ff923821c88e' }),
+    JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'Final answer' } })
+  ].join('\n');
+
+  assert.deepEqual(parseCodexJsonOutput(output), {
+    sessionRef: '019e44d7-f572-7223-9008-ff923821c88e',
+    finalMessage: 'Final answer'
+  });
 });
 
 test('creates, runs, captures output, and isolates sessions per task', async () => {
