@@ -724,6 +724,4 @@ Out of scope:
 ## Notes for Executor
 
 - Preview/model đã được user xác nhận.
-- grill-me không implement.
-- Không mở rộng scope ngoài phần đã xác nhận.
-- Nếu phát hiện mâu thuẫn mới trong execution, dừng lại và báo BLOCKED thay vì tự quyết.
+- ...
