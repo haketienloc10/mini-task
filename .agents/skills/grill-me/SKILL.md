@@ -304,9 +304,7 @@ Trước khi hỏi user, hãy tự kiểm tra những thông tin có thể xác 
 - Artifact hoặc ghi chú liên quan đã có sẵn.
 - Convention hoặc cấu trúc hiện hữu.
 
-Không cần exploration quá rộng. Chỉ kiểm tra đủ để tránh hỏi user những câu có thể tự xác minh nhanh.
-
-Chỉ hỏi user khi đó là quyết định về:
+Không cần exploration quá rộng. Chỉ kiểm tra đủ để tránh hỏi user những câu có thể tự xác minh nhanh. Chỉ hỏi user khi đó là quyết định về:
 
 - ý định thật sự;
 - business rule;
