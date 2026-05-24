@@ -99,12 +99,18 @@ test('builds codex exec resume command when task has a session ref', async () =>
 test('parses codex json output session and final message', () => {
   const output = [
     JSON.stringify({ type: 'thread.started', thread_id: '019e44d7-f572-7223-9008-ff923821c88e' }),
-    JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'Final answer' } })
+    JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'Final answer' } }),
+    JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 144551, output_tokens: 2232 } })
   ].join('\n');
 
   assert.deepEqual(parseCodexJsonOutput(output), {
     sessionRef: '019e44d7-f572-7223-9008-ff923821c88e',
-    finalMessage: 'Final answer'
+    finalMessage: 'Final answer',
+    tokenUsage: {
+      totalTokens: 146783,
+      inputTokens: 144551,
+      outputTokens: 2232
+    }
   });
 });
 

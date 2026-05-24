@@ -117,7 +117,8 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
           processRef: null,
           output: '',
           log: task.sessionRef ? `Resuming session ${task.sessionRef}\n` : 'Starting new session\n',
-          error: ''
+          error: '',
+          tokenUsage: null
         });
         runTask(taskForRun, store, runOptions).catch((error) => {
           console.error(`Background task run failed for ${task.id}:`, error);

@@ -168,6 +168,7 @@ export class TaskStore {
       output: '',
       log: '',
       error: '',
+      tokenUsage: null,
       messages: []
     };
     const tasks = await this.#readTasks();

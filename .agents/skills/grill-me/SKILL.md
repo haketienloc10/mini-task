@@ -93,6 +93,91 @@ Sau khi research, phải quay lại câu hỏi chính:
 
 ---
 
+## Context-First Behavior
+
+Trước khi hỏi user, grill-me phải ưu tiên khai thác những gì đã có trong ngữ cảnh.
+
+Nguồn nên kiểm tra trước gồm:
+
+- nội dung user vừa cung cấp;
+- tài liệu, ghi chú, artifact, hoặc file liên quan;
+- README, spec, config, script, source code nếu user đang nói về một project;
+- quyết định đã chốt trong cuộc trò chuyện hiện tại.
+
+Câu hỏi chỉ nên dành cho những điều không thể tự suy ra từ context, ví dụ:
+
+- intent thật sự của user;
+- preference;
+- trade-off user muốn chọn;
+- ranh giới sản phẩm;
+- mức chấp nhận rủi ro;
+- tiêu chí “tốt hơn mong đợi” theo góc nhìn của user.
+
+Nếu thông tin có thể tìm thấy trong tài liệu hoặc source code, hãy tự kiểm tra trước, rồi dùng kết quả đó để đặt câu hỏi sâu hơn.
+
+Một câu hỏi tốt không hỏi lại dữ kiện đã có.  
+Một câu hỏi tốt giúp user chốt điều mà tài liệu hoặc source code không thể tự trả lời.
+
+---
+
+## Completion Behavior
+
+Khi ý định đã đủ rõ ở mức hiện tại, grill-me dừng việc hỏi thêm và tạo một file Markdown ghi lại ý định đã được làm rõ.
+
+“Đủ rõ” nghĩa là user đã có thể nhìn thấy:
+
+- mình đang muốn đạt điều gì;
+- outcome mong muốn là gì;
+- ranh giới nào nên giữ;
+- quyết định nào đã được xác nhận;
+- giả định nào đang tồn tại;
+- tiêu chí nào dùng để đánh giá ý tưởng;
+- điểm nào còn mở nhưng chưa cần chốt ngay.
+
+File này là ảnh chụp ý tưởng hiện tại của user, không phải kế hoạch làm việc.
+
+Tên file khuyến nghị:
+
+`intent-snapshot.md`
+
+Nội dung file:
+
+# Intent Snapshot
+
+## Ý định hiện tại
+
+- ...
+
+## Outcome mong muốn
+
+- ...
+
+## Ranh giới nên giữ
+
+- ...
+
+## Quyết định đã xác nhận
+
+- ...
+
+## Giả định hiện tại
+
+- ...
+
+## Tiêu chí đánh giá ý tưởng
+
+- ...
+
+## Điểm còn mở
+
+- ...
+
+## Điểm nên suy nghĩ tiếp theo
+
+- ...
+
+---
+
 ## Expansion Behavior
 
 Mở rộng ý tưởng theo hướng làm outcome tốt hơn, không phải làm scope lớn hơn.
@@ -213,42 +298,6 @@ Khi user cần chọn giữa nhiều hướng, dùng format:
 ## Câu cần chốt
 
 Đại ca chọn hướng nào, hoặc muốn chỉnh lại tiêu chí so sánh?
-
----
-
-## Clarified Intent Pattern
-
-Khi ý tưởng đã đủ rõ hoặc user muốn tổng kết, dùng format:
-
-# Clarified Intent
-
-## Intent đã rõ
-
-- ...
-
-## Outcome mong muốn
-
-- ...
-
-## Ranh giới nên giữ
-
-- ...
-
-## Quyết định đã chốt
-
-- ...
-
-## Assumptions
-
-- ...
-
-## Acceptance Direction
-
-- ...
-
-## Câu hỏi còn mở
-
-- ...
 
 ---
 

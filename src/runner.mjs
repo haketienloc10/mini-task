@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { findSubagent } from './subagents.mjs';
 
-const DEFAULT_TIMEOUT_MS = Number(process.env.CODEX_TASK_TIMEOUT_MS ?? 120000);
+const DEFAULT_TIMEOUT_MS = Number(process.env.CODEX_TASK_TIMEOUT_MS ?? 1800000);
 
 export async function runTask(task, store, options = {}) {
   const startedAt = new Date().toISOString();
@@ -18,7 +18,8 @@ export async function runTask(task, store, options = {}) {
     runArtifactPath,
     output: '',
     log: task.sessionRef ? `Resuming session ${task.sessionRef}\n` : 'Starting new session\n',
-    error: ''
+    error: '',
+    tokenUsage: null
   });
 
   try {
@@ -65,6 +66,7 @@ export async function runTask(task, store, options = {}) {
         result.stderr ? `stderr:\n${result.stderr}` : ''
       ].filter(Boolean).join('\n'),
       error,
+      tokenUsage: result.tokenUsage ?? null,
       messages: updatedMessages
     });
   } catch (error) {
@@ -86,6 +88,7 @@ export async function runTask(task, store, options = {}) {
       output: '',
       log: `${task.sessionRef ? `Resuming session ${task.sessionRef}` : 'Starting new session'}\nFailed before completion`,
       error: error.message,
+      tokenUsage: null,
       messages: updatedMessages
     });
   }
@@ -219,7 +222,8 @@ export function executeProcess(runner, timeoutMs) {
         rawStdout: stdout,
         stderr,
         processRef,
-        sessionRef: parsed.sessionRef
+        sessionRef: parsed.sessionRef,
+        tokenUsage: parsed.tokenUsage
       });
     });
   });
@@ -228,6 +232,7 @@ export function executeProcess(runner, timeoutMs) {
 export function parseCodexJsonOutput(stdout) {
   let sessionRef = null;
   let finalMessage = '';
+  let tokenUsage = null;
 
   for (const line of stdout.split(/\r?\n/)) {
     if (!line.trim()) continue;
@@ -245,7 +250,28 @@ export function parseCodexJsonOutput(stdout) {
     if (event.type === 'item.completed' && event.item?.type === 'agent_message') {
       finalMessage = event.item.text ?? finalMessage;
     }
+
+    if (event.type === 'turn.completed' && event.usage) {
+      tokenUsage = normalizeTokenUsage(event.usage);
+    }
   }
 
-  return { sessionRef, finalMessage };
+  return { sessionRef, finalMessage, tokenUsage };
+}
+
+function normalizeTokenUsage(usage) {
+  const inputTokens = numberOrNull(usage.input_tokens);
+  const outputTokens = numberOrNull(usage.output_tokens);
+  const totalTokens = numberOrNull(usage.total_tokens)
+    ?? (inputTokens !== null && outputTokens !== null ? inputTokens + outputTokens : null);
+
+  return {
+    totalTokens,
+    inputTokens,
+    outputTokens
+  };
+}
+
+function numberOrNull(value) {
+  return Number.isFinite(value) ? value : null;
 }

@@ -469,6 +469,8 @@ function renderChat() {
 }
 
 function renderTaskOverview(task) {
+  const usage = tokenUsageForTask(task);
+
   refs.taskOverview.innerHTML = `
     <article>
       <span>Status</span>
@@ -485,6 +487,18 @@ function renderTaskOverview(task) {
     <article>
       <span>Updated</span>
       <strong>${escapeHtml(formatDate(task.updatedAt))}</strong>
+    </article>
+    <article>
+      <span>Total tokens</span>
+      <strong>${escapeHtml(formatTokenCount(usage.totalTokens))}</strong>
+    </article>
+    <article>
+      <span>Input tokens</span>
+      <strong>${escapeHtml(formatTokenCount(usage.inputTokens))}</strong>
+    </article>
+    <article>
+      <span>Output tokens</span>
+      <strong>${escapeHtml(formatTokenCount(usage.outputTokens))}</strong>
     </article>
   `;
 }
@@ -636,6 +650,18 @@ function workspaceForTask(task) {
 
 function formatDate(value) {
   return value ? new Date(value).toLocaleString() : 'N/A';
+}
+
+function tokenUsageForTask(task) {
+  return task.tokenUsage ?? {
+    totalTokens: null,
+    inputTokens: null,
+    outputTokens: null
+  };
+}
+
+function formatTokenCount(value) {
+  return Number.isFinite(value) ? new Intl.NumberFormat().format(value) : 'N/A';
 }
 
 function escapeHtml(value) {
