@@ -3,97 +3,141 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Codex Task Dispatch - Bảng điều phối tác vụ</title>
-    
-    <!-- SEO Meta Tags -->
-    <meta name="description" content="Bảng quản trị tác vụ Codex local chuyên nghiệp cho các lượt chạy Codex CLI một tác vụ một phiên. Quản lý, điều phối và chạy subagents hiệu quả với giao diện trực quan.">
-    <meta name="keywords" content="Codex, Task Dispatch, Subagents, Task Board, AI Development, Glassmorphism, Dark Mode, Web UI">
-    <meta name="theme-color" content="#0b0f19" id="meta-theme-color">
-    
-    <!-- Open Graph Metadata -->
-    <meta property="og:title" content="Codex Task Dispatch - Local Task Board">
-    <meta property="og:description" content="Quản lý, điều phối và chạy subagents hiệu quả với giao diện trực quan hiện đại.">
-    <meta property="og:type" content="website">
-    
-    <!-- Google Fonts Preconnect and Links -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    
-    <!-- Stylesheet -->
+    <title>Codex Task Dispatch - Project Command Center</title>
+    <meta name="description" content="Workspace quản lý project, task và agent cho các phiên Codex CLI local.">
+    <meta name="theme-color" content="#101317" id="meta-theme-color">
     <link rel="stylesheet" href="/styles.css">
-    
-    <!-- Theme Switch Script (Immediate execution to prevent page flash) -->
     <script>
       (function() {
         const savedTheme = localStorage.getItem('theme') || 'dark';
         document.documentElement.setAttribute('data-theme', savedTheme);
-        const themeColor = savedTheme === 'dark' ? '#0b0f19' : '#f3f6fa';
+        const themeColor = savedTheme === 'dark' ? '#101317' : '#f5f7fa';
         document.querySelector('meta[name="theme-color"]')?.setAttribute('content', themeColor);
       })();
     </script>
   </head>
   <body>
-    <!-- Floating background glow blobs for Glassmorphism depth -->
-    <div class="bg-glow-blobs" aria-hidden="true">
-      <div class="blob blob-1"></div>
-      <div class="blob blob-2"></div>
-    </div>
-
-    <main class="app">
-      <header class="toolbar">
-        <div>
-          <h1>Codex Task Dispatch</h1>
-          <p>Local task board for one-task-one-session Codex CLI runs.</p>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <span class="eyebrow">Local Codex Operations</span>
+          <h1>Project Command Center</h1>
+          <p>Quản lý project, task và agent trong cùng một workspace điều phối.</p>
         </div>
-        <div class="toolbar-actions">
-          <button id="themeToggle" type="button" class="theme-toggle" aria-label="Chuyển chế độ màu">
-            <span class="theme-icon">🌙</span>
-            <span class="theme-text">Dark Mode</span>
+        <div class="topbar-actions">
+          <button id="themeToggle" class="secondary-button" type="button" aria-label="Chuyển chế độ màu">
+            <span class="theme-text">Dark</span>
           </button>
-          <button id="refreshButton" type="button">Refresh</button>
+          <button id="refreshButton" class="primary-button" type="button">Refresh</button>
         </div>
       </header>
 
-      <section class="layout">
-        <!-- Cột 1: Projects Panel -->
-        <section class="panel projects-panel">
-          <div class="section-header">
-            <h2>Projects</h2>
-            <button id="newProjectBtn" type="button">New Project</button>
+      <section class="metrics-grid" aria-label="Workspace summary">
+        <article class="metric-card">
+          <span>Projects</span>
+          <strong id="metricProjects">0</strong>
+        </article>
+        <article class="metric-card">
+          <span>Active Tasks</span>
+          <strong id="metricActiveTasks">0</strong>
+        </article>
+        <article class="metric-card">
+          <span>Running Agents</span>
+          <strong id="metricRunningAgents">0</strong>
+        </article>
+        <article class="metric-card">
+          <span>Done</span>
+          <strong id="metricDoneTasks">0</strong>
+        </article>
+      </section>
+
+      <section class="workspace-layout">
+        <aside class="panel project-panel">
+          <div class="panel-header">
+            <div>
+              <span class="panel-kicker">Workspace</span>
+              <h2>Projects</h2>
+            </div>
+            <button id="newProjectBtn" class="compact-button" type="button">New</button>
           </div>
           <div id="projectList" class="project-list"></div>
+        </aside>
+
+        <section class="panel board-panel">
+          <div class="panel-header board-header">
+            <div>
+              <span class="panel-kicker">Selected Project</span>
+              <h2 id="activeProjectName">No project selected</h2>
+              <p id="activeProjectMeta" class="panel-subtitle"></p>
+            </div>
+            <button id="newTaskBtn" class="primary-button" type="button">New Task</button>
+          </div>
+
+          <div id="projectOverview" class="project-overview"></div>
+
+          <div class="task-board" aria-label="Task board">
+            <section class="task-column" data-status-column="Assigned">
+              <div class="column-header">
+                <h3>Assigned</h3>
+                <span id="countAssigned">0</span>
+              </div>
+              <div id="tasksAssigned" class="column-tasks"></div>
+            </section>
+            <section class="task-column" data-status-column="Running">
+              <div class="column-header">
+                <h3>Running</h3>
+                <span id="countRunning">0</span>
+              </div>
+              <div id="tasksRunning" class="column-tasks"></div>
+            </section>
+            <section class="task-column" data-status-column="Done">
+              <div class="column-header">
+                <h3>Done</h3>
+                <span id="countDone">0</span>
+              </div>
+              <div id="tasksDone" class="column-tasks"></div>
+            </section>
+            <section class="task-column" data-status-column="Failed">
+              <div class="column-header">
+                <h3>Failed</h3>
+                <span id="countFailed">0</span>
+              </div>
+              <div id="tasksFailed" class="column-tasks"></div>
+            </section>
+          </div>
         </section>
 
-        <!-- Cột 2: Tasks Panel -->
-        <section class="panel list-panel">
-          <div class="section-header">
-            <h2>Tasks</h2>
-            <button id="newTaskBtn" type="button">New Task</button>
-          </div>
-          <div id="taskList" class="task-list"></div>
-        </section>
+        <aside class="side-stack">
+          <section class="panel agent-panel">
+            <div class="panel-header">
+              <div>
+                <span class="panel-kicker">Capacity</span>
+                <h2>Agents</h2>
+              </div>
+            </div>
+            <div id="agentList" class="agent-list"></div>
+          </section>
 
-        <!-- Cột 3: Chat Detail Panel -->
-        <section class="panel detail-panel">
-          <div class="section-header">
-            <h2 id="detailTitle">Task Chat</h2>
-          </div>
-          <div id="chatArea" class="chat-area empty">
-            Select a task to start chatting.
-          </div>
-          <div id="chatInputArea" class="chat-input-area" style="display: none;">
-            <textarea id="chatInput" placeholder="Nhập tin nhắn để gửi subagent..." rows="2"></textarea>
-            <button id="sendChatBtn" type="button">Send</button>
-          </div>
-        </section>
+          <section class="panel detail-panel">
+            <div class="panel-header">
+              <div>
+                <span class="panel-kicker">Execution</span>
+                <h2 id="detailTitle">Task Chat</h2>
+              </div>
+            </div>
+            <div id="chatArea" class="chat-area empty">Select a task to start chatting.</div>
+            <div id="chatInputArea" class="chat-input-area" hidden>
+              <textarea id="chatInput" placeholder="Nhập tin nhắn để gửi subagent..." rows="2"></textarea>
+              <button id="sendChatBtn" class="primary-button" type="button">Send</button>
+            </div>
+          </section>
+        </aside>
       </section>
     </main>
 
-    <!-- New Project Modal -->
-    <div id="projectModal" class="modal">
+    <div id="projectModal" class="modal" aria-hidden="true">
       <div class="modal-content">
-        <span class="close-modal" id="closeProjectModal">&times;</span>
+        <button class="close-modal" id="closeProjectModal" type="button" aria-label="Close">x</button>
         <form id="projectForm">
           <h2>Create Project</h2>
           <label>
@@ -106,18 +150,17 @@
           </label>
           <label>
             Workspace path
-            <input name="workspacePath" required placeholder="/home/locdt/Notes/VSCode/mini-task">
+            <input name="workspacePath" required placeholder="/home/locdt/mini-task">
           </label>
-          <button type="submit">Create</button>
+          <button class="primary-button" type="submit">Create</button>
           <p id="projectFormMessage" class="message" role="status"></p>
         </form>
       </div>
     </div>
 
-    <!-- New Task Modal -->
-    <div id="taskModal" class="modal">
+    <div id="taskModal" class="modal" aria-hidden="true">
       <div class="modal-content">
-        <span class="close-modal" id="closeTaskModal">&times;</span>
+        <button class="close-modal" id="closeTaskModal" type="button" aria-label="Close">x</button>
         <form id="taskForm">
           <h2>Create Task</h2>
           <label>
@@ -133,55 +176,19 @@
             <textarea name="description" required rows="4"></textarea>
           </label>
           <label>
-            Subagent
+            Agent
             <select name="subagent" id="taskSubagentSelect" required></select>
           </label>
           <label>
             Notes
             <textarea name="notes" rows="2"></textarea>
           </label>
-          <button type="submit">Create</button>
+          <button class="primary-button" type="submit">Create</button>
           <p id="formMessage" class="message" role="status"></p>
         </form>
       </div>
     </div>
-    
+
     <script type="module" src="/app.js"></script>
-    
-    <!-- Theme Toggle Interaction Script -->
-    <script>
-      document.addEventListener('DOMContentLoaded', () => {
-        const themeToggle = document.getElementById('themeToggle');
-        const themeIcon = themeToggle.querySelector('.theme-icon');
-        const themeText = themeToggle.querySelector('.theme-text');
-        const metaThemeColor = document.getElementById('meta-theme-color');
-
-        function updateToggleUI(theme) {
-          if (theme === 'dark') {
-            themeIcon.textContent = '🌙';
-            themeText.textContent = 'Dark Mode';
-            if (metaThemeColor) metaThemeColor.setAttribute('content', '#0b0f19');
-          } else {
-            themeIcon.textContent = '☀️';
-            themeText.textContent = 'Light Mode';
-            if (metaThemeColor) metaThemeColor.setAttribute('content', '#f3f6fa');
-          }
-        }
-
-        // Initial setup
-        const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
-        updateToggleUI(currentTheme);
-
-        // Toggle theme handler
-        themeToggle.addEventListener('click', () => {
-          const activeTheme = document.documentElement.getAttribute('data-theme') || 'dark';
-          const newTheme = activeTheme === 'dark' ? 'light' : 'dark';
-          
-          document.documentElement.setAttribute('data-theme', newTheme);
-          localStorage.setItem('theme', newTheme);
-          updateToggleUI(newTheme);
-        });
-      });
-    </script>
   </body>
 </html>
