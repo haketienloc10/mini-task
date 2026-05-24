@@ -78,7 +78,8 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
           // ignore
         }
         
-        let result;
+        let taskForRun = task;
+        let runOptions = runnerOptions;
         if (body.prompt?.trim()) {
           const userMessage = {
             id: randomUUID(),
@@ -86,9 +87,11 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
             content: body.prompt.trim(),
             createdAt: new Date().toISOString()
           };
-          task.messages = [...(task.messages || []), userMessage];
-          await store.updateTask(task.id, { messages: task.messages });
-          result = await runTask(task, store, { ...runnerOptions, customPrompt: body.prompt.trim() });
+          taskForRun = {
+            ...task,
+            messages: [...(task.messages || []), userMessage]
+          };
+          runOptions = { ...runnerOptions, customPrompt: body.prompt.trim() };
         } else {
           if (!task.messages || task.messages.length === 0) {
             const firstUserMsg = {
@@ -97,15 +100,29 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
               content: [task.description, task.notes].filter(Boolean).join('\n\n'),
               createdAt: new Date().toISOString()
             };
-            task.messages = [firstUserMsg];
-            await store.updateTask(task.id, { messages: task.messages });
-            result = await runTask(task, store, runnerOptions);
+            taskForRun = {
+              ...task,
+              messages: [firstUserMsg]
+            };
           } else {
             const lastUserMsg = [...task.messages].reverse().find(m => m.sender === 'user');
-            result = await runTask(task, store, { ...runnerOptions, customPrompt: lastUserMsg?.content });
+            runOptions = { ...runnerOptions, customPrompt: lastUserMsg?.content };
           }
         }
-        return sendJson(res, 200, result);
+        const startedTask = await store.updateTask(task.id, {
+          messages: taskForRun.messages,
+          status: 'Running',
+          startedAt: new Date().toISOString(),
+          finishedAt: null,
+          processRef: null,
+          output: '',
+          log: task.sessionRef ? `Resuming session ${task.sessionRef}\n` : 'Starting new session\n',
+          error: ''
+        });
+        runTask(taskForRun, store, runOptions).catch((error) => {
+          console.error(`Background task run failed for ${task.id}:`, error);
+        });
+        return sendJson(res, 202, startedTask);
       }
 
       if (req.method === 'GET') {

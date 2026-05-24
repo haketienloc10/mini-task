@@ -1,4 +1,6 @@
 const BOARD_STATUSES = ['Assigned', 'Running', 'Done', 'Failed'];
+const ACTIVE_POLL_INTERVAL_MS = 2000;
+const IDLE_POLL_INTERVAL_MS = 15000;
 
 const state = {
   projects: [],
@@ -8,6 +10,9 @@ const state = {
   selectedTaskId: null,
   activeDetailTab: 'chat'
 };
+
+let pollTimer = null;
+let isLoadingData = false;
 
 const refs = {
   mainView: document.querySelector('#mainView'),
@@ -54,6 +59,7 @@ async function init() {
   bindEvents();
   syncThemeToggle();
   await loadData();
+  scheduleSmartPolling();
 }
 
 function bindEvents() {
@@ -65,6 +71,13 @@ function bindEvents() {
   window.addEventListener('hashchange', () => {
     syncRouteSelection();
     render();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      clearTimeout(pollTimer);
+      return;
+    }
+    loadData().catch((error) => console.error(error));
   });
 
   document.querySelectorAll('[data-detail-tab]').forEach((button) => {
@@ -147,27 +160,48 @@ async function createTask(event) {
 }
 
 async function loadData() {
-  state.projects = await api('/api/projects');
-  state.tasks = await api('/api/tasks');
-  syncRouteSelection();
+  if (isLoadingData) return;
+  isLoadingData = true;
 
-  if (state.projects.length && !state.projects.some((project) => project.id === state.selectedProjectId)) {
-    state.selectedProjectId = state.projects[0].id;
-  }
-  if (!state.projects.length) {
-    state.selectedProjectId = null;
-  }
+  try {
+    state.projects = await api('/api/projects');
+    state.tasks = await api('/api/tasks');
+    syncRouteSelection();
 
-  const projectTasks = selectedProjectTasks();
-  if (!isTaskDetailRoute() && projectTasks.length && !projectTasks.some((task) => task.id === state.selectedTaskId)) {
-    state.selectedTaskId = projectTasks[0].id;
-  }
-  if (!projectTasks.length) {
-    state.selectedTaskId = null;
-  }
+    if (state.projects.length && !state.projects.some((project) => project.id === state.selectedProjectId)) {
+      state.selectedProjectId = state.projects[0].id;
+    }
+    if (!state.projects.length) {
+      state.selectedProjectId = null;
+    }
 
-  await loadSubagents(state.selectedProjectId);
-  render();
+    const projectTasks = selectedProjectTasks();
+    if (!isTaskDetailRoute() && projectTasks.length && !projectTasks.some((task) => task.id === state.selectedTaskId)) {
+      state.selectedTaskId = projectTasks[0].id;
+    }
+    if (!projectTasks.length) {
+      state.selectedTaskId = null;
+    }
+
+    await loadSubagents(state.selectedProjectId);
+    render();
+  } finally {
+    isLoadingData = false;
+    scheduleSmartPolling();
+  }
+}
+
+function scheduleSmartPolling() {
+  clearTimeout(pollTimer);
+  if (document.hidden) return;
+
+  const interval = state.tasks.some((task) => task.status === 'Running')
+    ? ACTIVE_POLL_INTERVAL_MS
+    : IDLE_POLL_INTERVAL_MS;
+
+  pollTimer = setTimeout(() => {
+    loadData().catch((error) => console.error(error));
+  }, interval);
 }
 
 async function loadSubagents(projectId) {

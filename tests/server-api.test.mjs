@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { createServer } from '../src/server.mjs';
 import { TaskStore } from '../src/taskStore.mjs';
@@ -52,8 +53,10 @@ test('HTTP API creates, lists, details, and runs a task', async () => {
     assert.equal(detail.subagent, 'generator');
     assert.equal(detail.workspacePath, undefined);
 
-    const run = await request(`${baseUrl}/api/tasks/${created.id}/run`, { method: 'POST' });
-    assert.equal(run.status, 'Done');
+    const startedRun = await request(`${baseUrl}/api/tasks/${created.id}/run`, { method: 'POST' });
+    assert.equal(startedRun.status, 'Running');
+
+    const run = await waitForTaskStatus(baseUrl, created.id, 'Done');
     assert.match(run.output, /fake codex output/);
     assert.ok(run.startedAt);
     assert.ok(run.finishedAt);
@@ -107,8 +110,10 @@ test('HTTP API exposes, accepts, and runs default task mode', async () => {
     const detail = await request(`${baseUrl}/api/tasks/${created.id}`);
     assert.equal(detail.subagent, 'default');
 
-    const run = await request(`${baseUrl}/api/tasks/${created.id}/run`, { method: 'POST' });
-    assert.equal(run.status, 'Done');
+    const startedRun = await request(`${baseUrl}/api/tasks/${created.id}/run`, { method: 'POST' });
+    assert.equal(startedRun.status, 'Running');
+
+    const run = await waitForTaskStatus(baseUrl, created.id, 'Done');
     assert.ok(run.sessionRef);
     assert.ok(run.processRef);
 
@@ -174,8 +179,10 @@ test('HTTP API runs default codex command in the task workspace', async () => {
       })
     });
 
-    const run = await request(`${baseUrl}/api/tasks/${created.id}/run`, { method: 'POST' });
-    assert.equal(run.status, 'Done');
+    const startedRun = await request(`${baseUrl}/api/tasks/${created.id}/run`, { method: 'POST' });
+    assert.equal(startedRun.status, 'Running');
+
+    const run = await waitForTaskStatus(baseUrl, created.id, 'Done');
     assert.ok(run.sessionRef);
     assert.ok(run.processRef);
     assert.ok(run.runArtifactPath);
@@ -316,14 +323,14 @@ test('HTTP API chat session interaction', async () => {
     assert.deepEqual(createdTask.messages, []);
 
     // Run first time without custom prompt in body
-    const runResult1 = await request(`${baseUrl}/api/tasks/${createdTask.id}/run`, {
+    const startedRun1 = await request(`${baseUrl}/api/tasks/${createdTask.id}/run`, {
       method: 'POST',
       body: JSON.stringify({})
     });
-    assert.equal(runResult1.status, 'Done');
+    assert.equal(startedRun1.status, 'Running');
     
     // Check updated task messages
-    const updatedTask1 = await request(`${baseUrl}/api/tasks/${createdTask.id}`);
+    const updatedTask1 = await waitForTaskStatus(baseUrl, createdTask.id, 'Done');
     assert.equal(updatedTask1.messages.length, 2); // 1 User, 1 Agent
     assert.equal(updatedTask1.messages[0].sender, 'user');
     assert.match(updatedTask1.messages[0].content, /First instruction/);
@@ -331,21 +338,21 @@ test('HTTP API chat session interaction', async () => {
     assert.match(updatedTask1.messages[1].content, /fake codex output/);
 
     // Send custom prompt (follow-up)
-    const runResult2 = await request(`${baseUrl}/api/tasks/${createdTask.id}/run`, {
+    const startedRun2 = await request(`${baseUrl}/api/tasks/${createdTask.id}/run`, {
       method: 'POST',
       body: JSON.stringify({ prompt: 'Follow-up question' })
     });
-    assert.equal(runResult2.status, 'Done');
+    assert.equal(startedRun2.status, 'Running');
 
     // Check updated task messages
-    const updatedTask2 = await request(`${baseUrl}/api/tasks/${createdTask.id}`);
+    const updatedTask2 = await waitForTaskStatus(baseUrl, createdTask.id, 'Done');
     assert.equal(updatedTask2.messages.length, 4); // 2 User, 2 Agent
     assert.equal(updatedTask2.messages[2].sender, 'user');
     assert.equal(updatedTask2.messages[2].content, 'Follow-up question');
     assert.equal(updatedTask2.messages[3].sender, 'agent');
 
     // Verify the prompt sent to the runner for the second run was only 'Follow-up question'
-    const prompt2 = await readFile(path.join(runResult2.runArtifactPath, 'prompt.txt'), 'utf8');
+    const prompt2 = await readFile(path.join(updatedTask2.runArtifactPath, 'prompt.txt'), 'utf8');
     assert.equal(prompt2, 'Follow-up question');
   } finally {
     await new Promise((resolve) => server.close(resolve));
@@ -397,14 +404,20 @@ test('HTTP API resumes the existing codex session for follow-up chat', async () 
       })
     });
 
-    const firstRun = await request(`${baseUrl}/api/tasks/${task.id}/run`, { method: 'POST' });
+    const firstStartedRun = await request(`${baseUrl}/api/tasks/${task.id}/run`, { method: 'POST' });
+    assert.equal(firstStartedRun.status, 'Running');
+
+    const firstRun = await waitForTaskStatus(baseUrl, task.id, 'Done');
     assert.equal(firstRun.sessionRef, sessionId);
     assert.equal(firstRun.output, 'shim final output');
 
-    const secondRun = await request(`${baseUrl}/api/tasks/${task.id}/run`, {
+    const secondStartedRun = await request(`${baseUrl}/api/tasks/${task.id}/run`, {
       method: 'POST',
       body: JSON.stringify({ prompt: 'Follow up' })
     });
+    assert.equal(secondStartedRun.status, 'Running');
+
+    const secondRun = await waitForTaskStatus(baseUrl, task.id, 'Done');
     assert.equal(secondRun.sessionRef, sessionId);
 
     const invocations = (await readFile(argsLog, 'utf8'))
@@ -467,6 +480,19 @@ async function request(url, options = {}) {
   const data = await response.json();
   assert.equal(response.ok, true, data.error);
   return data;
+}
+
+async function waitForTaskStatus(baseUrl, taskId, status, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  let task;
+
+  while (Date.now() < deadline) {
+    task = await request(`${baseUrl}/api/tasks/${taskId}`);
+    if (task.status === status) return task;
+    await delay(50);
+  }
+
+  assert.fail(`Timed out waiting for task ${taskId} to reach ${status}; last status was ${task?.status}`);
 }
 
 async function createCodexAgents(root, names) {
