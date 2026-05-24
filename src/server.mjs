@@ -3,20 +3,25 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { TaskStore } from './taskStore.mjs';
-import { runTask } from './runner.mjs';
 import { findSubagent, listSubagents } from './subagents.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, '..', 'public');
+const workerFile = path.resolve(__dirname, 'taskWorker.mjs');
+const SSE_POLL_INTERVAL_MS = 250;
 
 export function createServer({ store = new TaskStore(), runnerOptions = {} } = {}) {
   const terminalClients = new Map();
   const taskClients = new Set();
-  const publishTerminalEvent = (taskId, event) => {
-    for (const res of terminalClients.get(taskId) ?? []) {
-      sendSseEvent(res, 'terminal', event, event.id);
-    }
+  let pollTimer = null;
+  let pollChain = Promise.resolve();
+  const knownTaskUpdatedAt = new Map();
+  let initPromise = null;
+  const ensureStoreReady = async () => {
+    initPromise ??= store.init().then(() => recoverInterruptedRunningTasks(store));
+    return initPromise;
   };
   const publishTaskEvent = (type, task) => {
     if (!task) return;
@@ -24,21 +29,43 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
       sendSseEvent(res, type, task);
     }
   };
-  const streamingStore = {
-    getProject: (...args) => store.getProject(...args),
-    createRunArtifact: (...args) => store.createRunArtifact(...args),
-    writeRunFile: (...args) => store.writeRunFile(...args),
-    updateTask: async (...args) => {
-      const task = await store.updateTask(...args);
-      publishTaskEvent('task-updated', task);
-      return task;
-    },
-    appendTerminalEvent: (...args) => store.appendTerminalEvent(...args)
+  const pollTaskChanges = async () => {
+    const tasks = await store.listTasks();
+    for (const task of tasks) {
+      const previousUpdatedAt = knownTaskUpdatedAt.get(task.id);
+      if (previousUpdatedAt && previousUpdatedAt !== task.updatedAt) {
+        publishTaskEvent('task-updated', task);
+      }
+      knownTaskUpdatedAt.set(task.id, task.updatedAt);
+
+      const clients = terminalClients.get(task.id);
+      if (!clients) continue;
+      for (const event of task.terminalEvents || []) {
+        for (const [res, state] of clients) {
+          if (state.sentEventIds.has(event.id)) continue;
+          sendSseEvent(res, 'terminal', event, event.id);
+          state.sentEventIds.add(event.id);
+        }
+      }
+    }
+  };
+  const startPolling = () => {
+    if (pollTimer) return;
+    pollTimer = setInterval(() => {
+      if (!taskClients.size && !terminalClients.size) return;
+      pollChain = pollChain.then(pollTaskChanges, pollTaskChanges).catch(() => {});
+    }, SSE_POLL_INTERVAL_MS);
+    pollTimer.unref?.();
+  };
+  const stopPollingIfIdle = () => {
+    if (!pollTimer || taskClients.size || terminalClients.size) return;
+    clearInterval(pollTimer);
+    pollTimer = null;
   };
 
   const server = http.createServer(async (req, res) => {
     try {
-      await store.init();
+      await ensureStoreReady();
       const url = new URL(req.url, `http://${req.headers.host}`);
 
       if (req.method === 'GET' && url.pathname === '/api/subagents') {
@@ -95,8 +122,10 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
         sendSseEvent(res, 'task-snapshot', await store.listTasks());
 
         taskClients.add(res);
+        startPolling();
         req.on('close', () => {
           taskClients.delete(res);
+          stopPollingIfIdle();
         });
         return;
       }
@@ -145,16 +174,20 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
         });
         res.write('retry: 1000\n\n');
 
-        if (!terminalClients.has(taskId)) terminalClients.set(taskId, new Set());
-        terminalClients.get(taskId).add(res);
+        if (!terminalClients.has(taskId)) terminalClients.set(taskId, new Map());
+        const clientState = { sentEventIds: new Set() };
+        terminalClients.get(taskId).set(res, clientState);
         for (const event of task.terminalEvents || []) {
           sendSseEvent(res, 'terminal', event, event.id);
+          clientState.sentEventIds.add(event.id);
         }
+        startPolling();
         req.on('close', () => {
           const clients = terminalClients.get(taskId);
           if (!clients) return;
           clients.delete(res);
           if (!clients.size) terminalClients.delete(taskId);
+          stopPollingIfIdle();
         });
         return;
       }
@@ -203,13 +236,6 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
             runOptions = { ...runnerOptions, customPrompt: lastUserMsg?.content };
           }
         }
-        runOptions = {
-          ...runOptions,
-          onTerminalEvent(taskId, event) {
-            runnerOptions.onTerminalEvent?.(taskId, event);
-            publishTerminalEvent(taskId, event);
-          }
-        };
         const startedTask = await store.updateTask(task.id, {
           messages: taskForRun.messages,
           status: 'Running',
@@ -221,11 +247,18 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
           error: '',
           tokenUsage: null
         });
-        publishTaskEvent('task-updated', startedTask);
-        runTask(taskForRun, streamingStore, runOptions).catch((error) => {
-          console.error(`Background task run failed for ${task.id}:`, error);
+        knownTaskUpdatedAt.set(startedTask.id, startedTask.updatedAt);
+        const workerRef = startTaskWorker({
+          taskId: task.id,
+          dataDir: store.dataDir,
+          runnerOptions: runOptions
         });
-        return sendJson(res, 202, startedTask);
+        const taskWithWorker = await store.updateTask(task.id, {
+          workerRef: String(workerRef),
+          workerHeartbeatAt: new Date().toISOString()
+        });
+        publishTaskEvent('task-updated', startedTask);
+        return sendJson(res, 202, taskWithWorker);
       }
 
       if (req.method === 'GET') {
@@ -237,7 +270,69 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
       return sendJson(res, 500, { error: error.message });
     }
   });
+  server.on('close', () => {
+    if (pollTimer) clearInterval(pollTimer);
+  });
   return server;
+}
+
+async function recoverInterruptedRunningTasks(store) {
+  const tasks = await store.listTasks();
+  const now = new Date().toISOString();
+  const message = 'Run interrupted because the task app stopped before Codex CLI completed. This run cannot be resumed safely.';
+
+  for (const task of tasks) {
+    if (task.status !== 'Running') continue;
+    if (isLikelyActiveRun(task)) continue;
+    await store.updateTask(task.id, {
+      status: 'Failed',
+      finishedAt: now,
+      currentRunRef: null,
+      output: '',
+      log: [task.log, message].filter(Boolean).join('\n'),
+      error: message
+    });
+  }
+}
+
+function startTaskWorker({ taskId, dataDir, runnerOptions }) {
+  const payload = JSON.stringify({
+    taskId,
+    dataDir,
+    runnerOptions: serializableRunnerOptions(runnerOptions)
+  });
+  const child = spawn(process.execPath, [workerFile], {
+    detached: true,
+    stdio: 'ignore',
+    env: {
+      ...process.env,
+      CODEX_TASK_WORKER_PAYLOAD: payload
+    }
+  });
+  child.unref();
+  return child.pid;
+}
+
+function serializableRunnerOptions(options) {
+  return Object.fromEntries(
+    Object.entries(options)
+      .filter(([, value]) => typeof value !== 'function' && value !== undefined)
+  );
+}
+
+function isLikelyActiveRun(task) {
+  return processExists(task.workerRef) || processExists(task.processRef);
+}
+
+function processExists(pid) {
+  const numericPid = Number(pid);
+  if (!Number.isInteger(numericPid) || numericPid <= 0) return false;
+  try {
+    process.kill(numericPid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function validateTaskInput(body, store, runnerOptions) {

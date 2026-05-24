@@ -68,6 +68,129 @@ test('HTTP API creates, lists, details, and runs a task', async () => {
   }
 });
 
+test('HTTP API recovers running tasks interrupted by app shutdown', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codex-task-interrupted-run-'));
+  const dataDir = path.join(root, 'data');
+  const workspace = await mkdtemp(path.join(root, 'workspace-'));
+  const projectId = 'interrupted-project';
+  const taskId = 'interrupted-task';
+  const now = new Date().toISOString();
+
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(path.join(dataDir, 'projects.json'), `${JSON.stringify([{
+    id: projectId,
+    name: 'Interrupted Project',
+    description: '',
+    workspacePath: workspace
+  }], null, 2)}\n`, 'utf8');
+  await writeFile(path.join(dataDir, 'tasks.json'), `${JSON.stringify([{
+    id: taskId,
+    projectId,
+    title: 'Interrupted task',
+    description: 'This task was running when the app stopped',
+    subagent: 'default',
+    notes: '',
+    status: 'Running',
+    createdAt: now,
+    updatedAt: now,
+    startedAt: now,
+    finishedAt: null,
+    sessionRef: 'old-session',
+    processRef: '12345',
+    currentRunRef: 'old-run',
+    runArtifactPath: null,
+    output: '',
+    log: 'Starting new session',
+    error: '',
+    tokenUsage: null,
+    terminalEvents: [],
+    messages: []
+  }], null, 2)}\n`, 'utf8');
+
+  const store = new TaskStore({ dataDir });
+  const server = createServer({
+    store,
+    runnerOptions: {
+      command: process.execPath,
+      args: [path.resolve('scripts/fake-codex-runner.mjs')],
+      timeoutMs: 5000
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const recovered = await request(`${baseUrl}/api/tasks/${taskId}`);
+    assert.equal(recovered.status, 'Failed');
+    assert.equal(recovered.currentRunRef, null);
+    assert.match(recovered.error, /cannot be resumed safely/);
+
+    const startedRun = await request(`${baseUrl}/api/tasks/${taskId}/run`, { method: 'POST' });
+    assert.equal(startedRun.status, 'Running');
+
+    const rerun = await waitForTaskStatus(baseUrl, taskId, 'Done');
+    assert.match(rerun.output, /fake codex output/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('detached task worker continues after the HTTP server stops', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codex-task-detached-worker-'));
+  const workspace = await mkdtemp(path.join(root, 'workspace-'));
+  const command = path.join(root, 'slow-codex-runner.mjs');
+
+  await writeFile(command, [
+    '#!/usr/bin/env node',
+    'import { setTimeout as delay } from "node:timers/promises";',
+    'await delay(500);',
+    'console.log("detached worker output");'
+  ].join('\n'), 'utf8');
+  await chmod(command, 0o755);
+
+  const store = new TaskStore({ dataDir: path.join(root, 'data') });
+  const server = createServer({
+    store,
+    runnerOptions: {
+      command,
+      timeoutMs: 5000
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const project = await request(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      body: JSON.stringify({ name: 'Detached Project', workspacePath: workspace })
+    });
+    const task = await request(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      body: JSON.stringify({
+        projectId: project.id,
+        title: 'Detached worker task',
+        description: 'Should finish after server stops',
+        subagent: 'default',
+        notes: ''
+      })
+    });
+
+    const startedRun = await request(`${baseUrl}/api/tasks/${task.id}/run`, { method: 'POST' });
+    assert.equal(startedRun.status, 'Running');
+
+    await new Promise((resolve) => server.close(resolve));
+
+    const finished = await waitForStoredTaskStatus(store, task.id, 'Done');
+    assert.match(finished.output, /detached worker output/);
+  } finally {
+    if (server.listening) await new Promise((resolve) => server.close(resolve));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('HTTP API streams terminal events for a running task', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'codex-task-terminal-sse-'));
   const workspace = await mkdtemp(path.join(root, 'workspace-'));
@@ -719,6 +842,19 @@ async function waitForTaskStatus(baseUrl, taskId, status, timeoutMs = 5000) {
   }
 
   assert.fail(`Timed out waiting for task ${taskId} to reach ${status}; last status was ${task?.status}`);
+}
+
+async function waitForStoredTaskStatus(store, taskId, status, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  let task;
+
+  while (Date.now() < deadline) {
+    task = await store.getTask(taskId);
+    if (task?.status === status) return task;
+    await delay(50);
+  }
+
+  assert.fail(`Timed out waiting for stored task ${taskId} to reach ${status}; last status was ${task?.status}`);
 }
 
 async function readTerminalEvents(response, isComplete) {
