@@ -42,6 +42,10 @@ html[data-theme="light"] {
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -449,6 +453,106 @@ h1 {
   gap: 16px;
 }
 
+.task-preview {
+  padding: 12px;
+}
+
+.task-preview .primary-button {
+  width: 100%;
+}
+
+.task-detail-view {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.detail-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.detail-toolbar h2 {
+  margin-top: 4px;
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+.detail-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.task-overview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.task-overview article {
+  min-height: 74px;
+  padding: 12px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.task-overview span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.task-overview strong {
+  display: block;
+  min-width: 0;
+  margin-top: 6px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-overview .status {
+  display: inline-flex;
+}
+
+.detail-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 12px 12px 0;
+}
+
+.detail-tab {
+  min-height: 36px;
+  padding: 0 12px;
+  color: var(--text-soft);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-weight: 800;
+}
+
+.detail-tab.active,
+.detail-tab:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: var(--surface-strong);
+}
+
 .agent-item {
   display: grid;
   gap: 12px;
@@ -504,7 +608,7 @@ h1 {
 }
 
 .detail-panel {
-  min-height: 500px;
+  min-height: 640px;
 }
 
 .chat-area {
@@ -515,6 +619,63 @@ h1 {
   max-height: 430px;
   padding: 12px;
   overflow-y: auto;
+}
+
+.detail-panel .chat-area {
+  min-height: 520px;
+  max-height: calc(100vh - 360px);
+}
+
+.detail-section {
+  display: grid;
+  gap: 10px;
+  color: var(--text-soft);
+}
+
+.detail-section h3 {
+  margin-top: 8px;
+  color: var(--text);
+  font-size: 13px;
+  text-transform: uppercase;
+}
+
+.detail-section p {
+  white-space: pre-wrap;
+}
+
+.detail-section code {
+  display: block;
+  padding: 12px;
+  overflow-wrap: anywhere;
+  color: var(--text-soft);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.activity-list {
+  display: grid;
+  gap: 10px;
+}
+
+.activity-list article {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.activity-list strong {
+  color: var(--text);
+}
+
+.activity-list span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-soft);
 }
 
 .task-brief {
@@ -731,6 +892,10 @@ textarea:focus {
     grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
   }
 
+  .task-preview-panel {
+    grid-column: 1 / -1;
+  }
+
   .side-stack {
     grid-column: 1 / -1;
     grid-template-columns: minmax(0, 420px) minmax(0, 1fr);
@@ -744,7 +909,9 @@ textarea:focus {
 
   .topbar,
   .workspace-layout,
-  .side-stack {
+  .side-stack,
+  .detail-layout,
+  .task-overview {
     grid-template-columns: 1fr;
   }
 
@@ -765,17 +932,24 @@ textarea:focus {
   .task-column {
     min-height: auto;
   }
+
+  .detail-panel .chat-area {
+    min-height: 420px;
+    max-height: none;
+  }
 }
 
 @media (max-width: 560px) {
   .metrics-grid,
   .project-overview,
-  .chat-input-area {
+  .chat-input-area,
+  .activity-list article {
     grid-template-columns: 1fr;
   }
 
   .panel-header,
-  .board-header {
+  .board-header,
+  .detail-toolbar {
     display: grid;
   }
 }

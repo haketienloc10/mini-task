@@ -51,7 +51,7 @@
         </article>
       </section>
 
-      <section class="workspace-layout">
+      <section id="mainView" class="workspace-layout">
         <aside class="panel project-panel">
           <div class="panel-header">
             <div>
@@ -107,23 +107,43 @@
           </div>
         </section>
 
-        <aside class="side-stack">
-          <section class="panel agent-panel">
+        <aside class="panel task-preview-panel">
+          <div class="panel-header">
+            <div>
+              <span class="panel-kicker">Task Preview</span>
+              <h2 id="previewTitle">No task selected</h2>
+            </div>
+          </div>
+          <div id="taskPreview" class="task-preview empty">Select a task to view details.</div>
+        </aside>
+      </section>
+
+      <section id="taskDetailView" class="task-detail-view" hidden>
+        <div class="detail-toolbar">
+          <button id="backToBoardBtn" class="secondary-button" type="button">Back</button>
+          <div>
+            <span class="panel-kicker">Task Detail</span>
+            <h2 id="detailTitle">Task Detail</h2>
+          </div>
+        </div>
+
+        <section class="detail-layout">
+          <aside class="panel agent-panel">
             <div class="panel-header">
               <div>
-                <span class="panel-kicker">Capacity</span>
+                <span class="panel-kicker">Agent Menu</span>
                 <h2>Agents</h2>
               </div>
             </div>
             <div id="agentList" class="agent-list"></div>
-          </section>
+          </aside>
 
           <section class="panel detail-panel">
-            <div class="panel-header">
-              <div>
-                <span class="panel-kicker">Execution</span>
-                <h2 id="detailTitle">Task Chat</h2>
-              </div>
+            <div id="taskOverview" class="task-overview"></div>
+            <div class="detail-tabs" role="tablist" aria-label="Task detail sections">
+              <button class="detail-tab active" data-detail-tab="chat" type="button">Chat</button>
+              <button class="detail-tab" data-detail-tab="overview" type="button">Overview</button>
+              <button class="detail-tab" data-detail-tab="activity" type="button">Activity</button>
             </div>
             <div id="chatArea" class="chat-area empty">Select a task to start chatting.</div>
             <div id="chatInputArea" class="chat-input-area" hidden>
@@ -131,7 +151,7 @@
               <button id="sendChatBtn" class="primary-button" type="button">Send</button>
             </div>
           </section>
-        </aside>
+        </section>
       </section>
     </main>
 

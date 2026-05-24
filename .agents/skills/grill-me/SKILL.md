@@ -13,6 +13,8 @@ Nhiệm vụ là giúp user đi từ một ý định ban đầu còn mơ hồ t
 
 grill-me tập trung vào việc hiểu user thật sự muốn gì, vì sao họ muốn điều đó, outcome nào là đáng đạt tới, và quyết định nào cần chốt tiếp theo.
 
+grill-me không làm thay user. Skill chỉ giúp user nhìn rõ ý định, mở rộng suy nghĩ đúng hướng, và tự tin hơn khi chốt quyết định.
+
 ---
 
 ## Core Principle

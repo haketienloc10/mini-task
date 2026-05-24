@@ -5,10 +5,13 @@ const state = {
   tasks: [],
   subagents: [],
   selectedProjectId: null,
-  selectedTaskId: null
+  selectedTaskId: null,
+  activeDetailTab: 'chat'
 };
 
 const refs = {
+  mainView: document.querySelector('#mainView'),
+  taskDetailView: document.querySelector('#taskDetailView'),
   metricProjects: document.querySelector('#metricProjects'),
   metricActiveTasks: document.querySelector('#metricActiveTasks'),
   metricRunningAgents: document.querySelector('#metricRunningAgents'),
@@ -17,11 +20,15 @@ const refs = {
   activeProjectName: document.querySelector('#activeProjectName'),
   activeProjectMeta: document.querySelector('#activeProjectMeta'),
   projectOverview: document.querySelector('#projectOverview'),
+  taskPreview: document.querySelector('#taskPreview'),
+  previewTitle: document.querySelector('#previewTitle'),
+  taskOverview: document.querySelector('#taskOverview'),
   agentList: document.querySelector('#agentList'),
   chatArea: document.querySelector('#chatArea'),
   chatInputArea: document.querySelector('#chatInputArea'),
   chatInput: document.querySelector('#chatInput'),
   sendChatBtn: document.querySelector('#sendChatBtn'),
+  backToBoardBtn: document.querySelector('#backToBoardBtn'),
   refreshButton: document.querySelector('#refreshButton'),
   detailTitle: document.querySelector('#detailTitle'),
   themeToggle: document.querySelector('#themeToggle'),
@@ -52,6 +59,20 @@ async function init() {
 function bindEvents() {
   refs.refreshButton.addEventListener('click', loadData);
   refs.themeToggle.addEventListener('click', toggleTheme);
+  refs.backToBoardBtn.addEventListener('click', () => {
+    window.location.hash = '';
+  });
+  window.addEventListener('hashchange', () => {
+    syncRouteSelection();
+    render();
+  });
+
+  document.querySelectorAll('[data-detail-tab]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.activeDetailTab = button.dataset.detailTab;
+      renderChat();
+    });
+  });
 
   refs.newProjectBtn.addEventListener('click', () => openModal(refs.projectModal, refs.projectFormMessage));
   refs.closeProjectModal.addEventListener('click', () => closeModal(refs.projectModal));
@@ -118,6 +139,7 @@ async function createTask(event) {
     closeModal(refs.taskModal);
     state.selectedProjectId = task.projectId;
     state.selectedTaskId = task.id;
+    window.location.hash = `#/tasks/${task.id}`;
     await loadData();
   } catch (error) {
     refs.formMessage.textContent = error.message;
@@ -127,6 +149,7 @@ async function createTask(event) {
 async function loadData() {
   state.projects = await api('/api/projects');
   state.tasks = await api('/api/tasks');
+  syncRouteSelection();
 
   if (state.projects.length && !state.projects.some((project) => project.id === state.selectedProjectId)) {
     state.selectedProjectId = state.projects[0].id;
@@ -136,7 +159,7 @@ async function loadData() {
   }
 
   const projectTasks = selectedProjectTasks();
-  if (projectTasks.length && !projectTasks.some((task) => task.id === state.selectedTaskId)) {
+  if (!isTaskDetailRoute() && projectTasks.length && !projectTasks.some((task) => task.id === state.selectedTaskId)) {
     state.selectedTaskId = projectTasks[0].id;
   }
   if (!projectTasks.length) {
@@ -160,12 +183,20 @@ function renderSubagentOptions() {
 
 function render() {
   refs.newTaskBtn.disabled = !state.projects.length;
+  renderRoute();
   renderMetrics();
   renderProjects();
   renderProjectOverview();
   renderTaskBoard();
+  renderTaskPreview();
   renderAgents();
   renderChat();
+}
+
+function renderRoute() {
+  const isDetail = isTaskDetailRoute() && selectedTask();
+  refs.mainView.hidden = isDetail;
+  refs.taskDetailView.hidden = !isDetail;
 }
 
 function renderMetrics() {
@@ -205,6 +236,7 @@ function renderProjects() {
       state.selectedProjectId = button.dataset.projectId;
       const tasks = selectedProjectTasks();
       state.selectedTaskId = tasks[0]?.id ?? null;
+      window.location.hash = '';
       loadSubagents(state.selectedProjectId).then(render);
     });
   });
@@ -265,6 +297,7 @@ function renderTaskBoard() {
     button.addEventListener('click', () => {
       state.selectedTaskId = button.dataset.taskId;
       renderTaskBoard();
+      renderTaskPreview();
       renderAgents();
       renderChat();
     });
@@ -285,6 +318,34 @@ function renderTaskCard(task) {
       </span>
     </button>
   `;
+}
+
+function renderTaskPreview() {
+  const task = selectedTask();
+
+  if (!task) {
+    refs.previewTitle.textContent = 'No task selected';
+    refs.taskPreview.classList.add('empty');
+    refs.taskPreview.innerHTML = 'Select a task to view details.';
+    return;
+  }
+
+  refs.previewTitle.textContent = task.title;
+  refs.taskPreview.classList.remove('empty');
+  refs.taskPreview.innerHTML = `
+    <section class="task-brief">
+      <div class="brief-line"><span>Status</span><strong class="status ${task.status}">${escapeHtml(task.status)}</strong></div>
+      <div class="brief-line"><span>Agent</span><strong>${escapeHtml(agentLabel(task.subagent))}</strong></div>
+      <div class="brief-line"><span>Updated</span><strong>${escapeHtml(formatDate(task.updatedAt))}</strong></div>
+      <p>${escapeHtml(task.description)}</p>
+      ${task.notes ? `<p class="notes">${escapeHtml(task.notes)}</p>` : ''}
+      <button id="openTaskDetailBtn" class="primary-button" type="button">Open Detail</button>
+    </section>
+  `;
+  document.querySelector('#openTaskDetailBtn').addEventListener('click', () => {
+    state.activeDetailTab = 'chat';
+    window.location.hash = `#/tasks/${task.id}`;
+  });
 }
 
 function renderAgents() {
@@ -316,6 +377,7 @@ function renderChat() {
 
   if (!task) {
     refs.detailTitle.textContent = 'Task Chat';
+    refs.taskOverview.innerHTML = '';
     refs.chatArea.classList.add('empty');
     refs.chatArea.innerHTML = 'Select a task to start chatting.';
     refs.chatInputArea.hidden = true;
@@ -323,8 +385,20 @@ function renderChat() {
   }
 
   refs.detailTitle.textContent = task.title;
+  renderTaskOverview(task);
+  renderDetailTabs();
   refs.chatArea.classList.remove('empty');
-  refs.chatInputArea.hidden = false;
+  refs.chatInputArea.hidden = state.activeDetailTab !== 'chat';
+
+  if (state.activeDetailTab === 'overview') {
+    refs.chatArea.innerHTML = renderOverviewDetail(task);
+    return;
+  }
+
+  if (state.activeDetailTab === 'activity') {
+    refs.chatArea.innerHTML = renderActivityDetail(task);
+    return;
+  }
 
   const isRunning = task.status === 'Running';
   refs.chatInput.disabled = isRunning;
@@ -358,6 +432,68 @@ function renderChat() {
     </div>
   `).join('');
   refs.chatArea.scrollTop = refs.chatArea.scrollHeight;
+}
+
+function renderTaskOverview(task) {
+  refs.taskOverview.innerHTML = `
+    <article>
+      <span>Status</span>
+      <strong class="status ${task.status}">${escapeHtml(task.status)}</strong>
+    </article>
+    <article>
+      <span>Agent</span>
+      <strong>${escapeHtml(agentLabel(task.subagent))}</strong>
+    </article>
+    <article>
+      <span>Session</span>
+      <strong>${escapeHtml(task.sessionRef || 'Not started')}</strong>
+    </article>
+    <article>
+      <span>Updated</span>
+      <strong>${escapeHtml(formatDate(task.updatedAt))}</strong>
+    </article>
+  `;
+}
+
+function renderDetailTabs() {
+  document.querySelectorAll('[data-detail-tab]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.detailTab === state.activeDetailTab);
+  });
+}
+
+function renderOverviewDetail(task) {
+  return `
+    <section class="detail-section">
+      <h3>Description</h3>
+      <p>${escapeHtml(task.description)}</p>
+      ${task.notes ? `<h3>Notes</h3><p>${escapeHtml(task.notes)}</p>` : ''}
+      <h3>Workspace</h3>
+      <code>${escapeHtml(workspaceForTask(task))}</code>
+      ${task.runArtifactPath ? `<h3>Run Artifact</h3><code>${escapeHtml(task.runArtifactPath)}</code>` : ''}
+    </section>
+  `;
+}
+
+function renderActivityDetail(task) {
+  const events = [
+    ['Created', task.createdAt],
+    ['Started', task.startedAt],
+    ['Finished', task.finishedAt],
+    ['Last updated', task.updatedAt]
+  ].filter(([, value]) => value);
+
+  return `
+    <section class="activity-list">
+      ${events.map(([label, value]) => `
+        <article>
+          <strong>${escapeHtml(label)}</strong>
+          <span>${escapeHtml(formatDate(value))}</span>
+        </article>
+      `).join('')}
+      ${task.error ? `<article><strong>Error</strong><span>${escapeHtml(task.error)}</span></article>` : ''}
+      ${task.processRef ? `<article><strong>Process</strong><span>${escapeHtml(task.processRef)}</span></article>` : ''}
+    </section>
+  `;
 }
 
 async function sendChatMessage() {
@@ -396,6 +532,26 @@ function selectedProjectTasks() {
 
 function tasksForProject(projectId) {
   return state.tasks.filter((task) => task.projectId === projectId);
+}
+
+function syncRouteSelection() {
+  const taskId = taskIdFromHash();
+  if (!taskId) return;
+
+  const task = state.tasks.find((candidate) => candidate.id === taskId);
+  if (!task) return;
+
+  state.selectedTaskId = task.id;
+  state.selectedProjectId = task.projectId;
+}
+
+function taskIdFromHash() {
+  const match = window.location.hash.match(/^#\/tasks\/([^/]+)$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function isTaskDetailRoute() {
+  return Boolean(taskIdFromHash());
 }
 
 function openModal(modal, message) {
