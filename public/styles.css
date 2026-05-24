@@ -133,7 +133,8 @@ h1 {
 
 .primary-button,
 .secondary-button,
-.compact-button {
+.compact-button,
+.danger-button {
   min-height: 40px;
   border-radius: var(--radius);
   padding: 0 14px;
@@ -160,6 +161,25 @@ h1 {
 .secondary-button:hover:not(:disabled),
 .compact-button:hover:not(:disabled) {
   border-color: var(--border-strong);
+}
+
+.danger-button {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger), transparent 55%);
+}
+
+.danger-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger), transparent 90%);
+  border-color: var(--danger);
+}
+
+.header-actions,
+.task-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .metrics-grid {

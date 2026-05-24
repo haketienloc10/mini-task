@@ -197,6 +197,34 @@ export class TaskStore {
     return tasks[index];
   }
 
+  async deleteTask(id) {
+    const tasks = await this.#readTasks();
+    const task = tasks.find((candidate) => candidate.id === id);
+    if (!task) return null;
+    if (task.status === 'Running') {
+      throw new Error('Running tasks cannot be deleted');
+    }
+
+    await this.#writeTasks(tasks.filter((candidate) => candidate.id !== id));
+    return task;
+  }
+
+  async deleteProject(id) {
+    const projects = await this.#readProjects();
+    const project = projects.find((candidate) => candidate.id === id);
+    if (!project) return null;
+
+    const tasks = await this.#readTasks();
+    const projectTasks = tasks.filter((task) => task.projectId === id);
+    if (projectTasks.some((task) => task.status === 'Running')) {
+      throw new Error('Projects with running tasks cannot be deleted');
+    }
+
+    await this.#writeProjects(projects.filter((candidate) => candidate.id !== id));
+    await this.#writeTasks(tasks.filter((task) => task.projectId !== id));
+    return { project, tasks: projectTasks };
+  }
+
   async appendTerminalEvent(id, event) {
     const tasks = await this.#readTasks();
     const index = tasks.findIndex((task) => task.id === id);

@@ -418,6 +418,99 @@ test('HTTP API projects management', async () => {
   }
 });
 
+test('HTTP API deletes tasks and projects', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codex-task-delete-api-'));
+  const workspace = await mkdtemp(path.join(root, 'workspace-'));
+  const homeCodexDir = await createCodexAgents(root, ['generator']);
+  const store = new TaskStore({ dataDir: path.join(root, 'data') });
+  const server = createServer({ store, runnerOptions: { homeCodexDir } });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const project = await request(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      body: JSON.stringify({ name: 'Delete Project', workspacePath: workspace })
+    });
+    const task = await request(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      body: JSON.stringify({
+        projectId: project.id,
+        title: 'Delete task',
+        description: 'Delete this task',
+        subagent: 'generator',
+        notes: ''
+      })
+    });
+
+    const deletedTask = await request(`${baseUrl}/api/tasks/${task.id}`, { method: 'DELETE' });
+    assert.equal(deletedTask.id, task.id);
+    const missingTask = await fetch(`${baseUrl}/api/tasks/${task.id}`);
+    assert.equal(missingTask.status, 404);
+
+    const remainingTask = await request(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      body: JSON.stringify({
+        projectId: project.id,
+        title: 'Cascade task',
+        description: 'Deleted with project',
+        subagent: 'generator',
+        notes: ''
+      })
+    });
+    const deletedProject = await request(`${baseUrl}/api/projects/${project.id}`, { method: 'DELETE' });
+    assert.equal(deletedProject.project.id, project.id);
+    assert.deepEqual(deletedProject.tasks.map((candidate) => candidate.id), [remainingTask.id]);
+
+    const projects = await request(`${baseUrl}/api/projects`);
+    assert.equal(projects.some((candidate) => candidate.id === project.id), false);
+    const tasks = await request(`${baseUrl}/api/tasks`);
+    assert.equal(tasks.some((candidate) => candidate.projectId === project.id), false);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('HTTP API rejects deleting running tasks and projects', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codex-task-delete-running-api-'));
+  const workspace = await mkdtemp(path.join(root, 'workspace-'));
+  const homeCodexDir = await createCodexAgents(root, ['generator']);
+  const store = new TaskStore({ dataDir: path.join(root, 'data') });
+  const server = createServer({ store, runnerOptions: { homeCodexDir } });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const project = await request(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      body: JSON.stringify({ name: 'Running Project', workspacePath: workspace })
+    });
+    const task = await request(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      body: JSON.stringify({
+        projectId: project.id,
+        title: 'Running task',
+        description: 'Cannot delete while running',
+        subagent: 'generator',
+        notes: ''
+      })
+    });
+    await store.updateTask(task.id, { status: 'Running' });
+
+    const taskDelete = await fetch(`${baseUrl}/api/tasks/${task.id}`, { method: 'DELETE' });
+    assert.equal(taskDelete.status, 409);
+
+    const projectDelete = await fetch(`${baseUrl}/api/projects/${project.id}`, { method: 'DELETE' });
+    assert.equal(projectDelete.status, 409);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('HTTP API chat session interaction', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'codex-task-chat-'));
   const workspace = await mkdtemp(path.join(root, 'workspace-'));

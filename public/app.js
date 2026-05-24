@@ -42,6 +42,7 @@ const refs = {
   metaThemeColor: document.querySelector('#meta-theme-color'),
   projectModal: document.querySelector('#projectModal'),
   newProjectBtn: document.querySelector('#newProjectBtn'),
+  deleteProjectBtn: document.querySelector('#deleteProjectBtn'),
   closeProjectModal: document.querySelector('#closeProjectModal'),
   projectForm: document.querySelector('#projectForm'),
   projectFormMessage: document.querySelector('#projectFormMessage'),
@@ -90,6 +91,7 @@ function bindEvents() {
   });
 
   refs.newProjectBtn.addEventListener('click', () => openModal(refs.projectModal, refs.projectFormMessage));
+  refs.deleteProjectBtn.addEventListener('click', deleteSelectedProject);
   refs.closeProjectModal.addEventListener('click', () => closeModal(refs.projectModal));
 
   refs.newTaskBtn.addEventListener('click', async () => {
@@ -205,6 +207,7 @@ function renderSubagentOptions() {
 
 function render() {
   refs.newTaskBtn.disabled = !state.projects.length;
+  refs.deleteProjectBtn.disabled = !selectedProject();
   renderRoute();
   renderTaskData();
   syncTerminalStream();
@@ -237,6 +240,9 @@ function syncTaskStream() {
   state.taskEventSource.addEventListener('task-updated', (event) => {
     mergeTask(JSON.parse(event.data));
   });
+  state.taskEventSource.addEventListener('task-deleted', (event) => {
+    removeTask(JSON.parse(event.data).id);
+  });
   state.taskEventSource.addEventListener('error', () => {
     if (state.taskEventSource?.readyState === EventSource.CLOSED) {
       closeTaskStream();
@@ -262,6 +268,17 @@ function mergeTask(task) {
   }
   state.tasks.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
   syncRouteSelection();
+  ensureSelectedTask();
+  renderTaskData();
+  syncTerminalStream();
+}
+
+function removeTask(taskId) {
+  state.tasks = state.tasks.filter((task) => task.id !== taskId);
+  if (state.selectedTaskId === taskId) {
+    state.selectedTaskId = null;
+    if (isTaskDetailRoute()) window.location.hash = '';
+  }
   ensureSelectedTask();
   renderTaskData();
   syncTerminalStream();
@@ -413,13 +430,48 @@ function renderTaskPreview() {
       <div class="brief-line"><span>Updated</span><strong>${escapeHtml(formatDate(task.updatedAt))}</strong></div>
       <p>${escapeHtml(task.description)}</p>
       ${task.notes ? `<p class="notes">${escapeHtml(task.notes)}</p>` : ''}
-      <button id="openTaskDetailBtn" class="primary-button" type="button">Open Detail</button>
+      <div class="task-actions">
+        <button id="deleteTaskBtn" class="danger-button" type="button">Delete</button>
+        <button id="openTaskDetailBtn" class="primary-button" type="button">Open Detail</button>
+      </div>
     </section>
   `;
+  document.querySelector('#deleteTaskBtn').addEventListener('click', deleteSelectedTask);
   document.querySelector('#openTaskDetailBtn').addEventListener('click', () => {
     state.activeDetailTab = 'chat';
     window.location.hash = `#/tasks/${task.id}`;
   });
+}
+
+async function deleteSelectedProject() {
+  const project = selectedProject();
+  if (!project) return;
+  if (!confirm(`Delete project "${project.name}" and all of its tasks?`)) return;
+
+  try {
+    await api(`/api/projects/${encodeURIComponent(project.id)}`, { method: 'DELETE' });
+    state.selectedProjectId = null;
+    state.selectedTaskId = null;
+    window.location.hash = '';
+    await loadData();
+  } catch (error) {
+    alert(`Failed to delete project: ${error.message}`);
+    await loadData();
+  }
+}
+
+async function deleteSelectedTask() {
+  const task = selectedTask();
+  if (!task) return;
+  if (!confirm(`Delete task "${task.title}"?`)) return;
+
+  try {
+    await api(`/api/tasks/${encodeURIComponent(task.id)}`, { method: 'DELETE' });
+    removeTask(task.id);
+  } catch (error) {
+    alert(`Failed to delete task: ${error.message}`);
+    await loadData();
+  }
 }
 
 function renderAgents() {

@@ -67,6 +67,20 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
         return sendJson(res, 201, project);
       }
 
+      const projectMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
+      if (req.method === 'DELETE' && projectMatch) {
+        try {
+          const deleted = await store.deleteProject(projectMatch[1]);
+          if (!deleted) return sendJson(res, 404, { error: 'Project not found' });
+          for (const task of deleted.tasks) {
+            publishTaskEvent('task-deleted', task);
+          }
+          return sendJson(res, 200, deleted);
+        } catch (error) {
+          return sendJson(res, 409, { error: error.message });
+        }
+      }
+
       if (req.method === 'GET' && url.pathname === '/api/tasks') {
         return sendJson(res, 200, await store.listTasks());
       }
@@ -105,6 +119,17 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
         const task = await store.getTask(taskMatch[1]);
         if (!task) return sendJson(res, 404, { error: 'Task not found' });
         return sendJson(res, 200, task);
+      }
+
+      if (req.method === 'DELETE' && taskMatch) {
+        try {
+          const task = await store.deleteTask(taskMatch[1]);
+          if (!task) return sendJson(res, 404, { error: 'Task not found' });
+          publishTaskEvent('task-deleted', task);
+          return sendJson(res, 200, task);
+        } catch (error) {
+          return sendJson(res, 409, { error: error.message });
+        }
       }
 
       const terminalEventsMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/terminal-events$/);
