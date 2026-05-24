@@ -777,19 +777,63 @@ function formatItem(item, action) {
   if (item.type === 'agent_message') {
     return [action, item.text].filter(Boolean).join('\n');
   }
+  if (item.type === 'mcp_tool_call') {
+    return [action, formatMcpToolCall(item), formatRanCommand(item) || formatToolArguments(item)].filter(Boolean).join('\n');
+  }
   if (item.type === 'tool_call') {
-    return [action, item.name, item.arguments].filter(Boolean).join('\n');
+    return [action, formatToolCall(item), formatRanCommand(item) || formatToolArguments(item)].filter(Boolean).join('\n');
   }
   if (item.type === 'tool_call_output') {
     return [action, item.output].filter(Boolean).join('\n');
   }
+  const command = formatRanCommand(item);
+  if (command) return [action, item.type, command].filter(Boolean).join('\n');
   return `${action} ${item.type || 'item'}`;
 }
 
 function itemKind(item) {
   if (item?.type === 'agent_message') return 'agent';
-  if (item?.type === 'tool_call' || item?.type === 'tool_call_output') return 'tool';
+  if (item?.type === 'tool_call' || item?.type === 'mcp_tool_call' || item?.type === 'tool_call_output') return 'tool';
   return 'item';
+}
+
+function formatMcpToolCall(item) {
+  const server = item.server || item.server_name || item.mcp_server;
+  const tool = item.tool || item.tool_name || item.name;
+  return ['MCP', [server, tool].filter(Boolean).join('.')].filter(Boolean).join(' ');
+}
+
+function formatToolCall(item) {
+  return item.name || item.tool || item.tool_name || item.function?.name || item.type;
+}
+
+function formatRanCommand(item) {
+  const args = parseItemArguments(item.arguments ?? item.args ?? item.input ?? item.parameters);
+  const command = item.command ?? item.cmd ?? args?.command ?? args?.cmd;
+  if (command) return `Ran ${formatCommand(command)}`;
+  const argv = item.argv ?? args?.argv ?? args?.args;
+  if (Array.isArray(argv) && argv.length) return `Ran ${argv.filter(Boolean).join(' ')}`;
+  return '';
+}
+
+function formatToolArguments(item) {
+  const args = item.arguments ?? item.args ?? item.input ?? item.parameters;
+  if (!args) return '';
+  return typeof args === 'string' ? args : JSON.stringify(args);
+}
+
+function formatCommand(command) {
+  if (Array.isArray(command)) return command.filter(Boolean).join(' ');
+  return String(command);
+}
+
+function parseItemArguments(value) {
+  if (!value || typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 
 function formatUsage(usage) {
