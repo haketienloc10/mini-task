@@ -28,6 +28,7 @@ const refs = {
   projectOverview: document.querySelector('#projectOverview'),
   taskPreview: document.querySelector('#taskPreview'),
   previewTitle: document.querySelector('#previewTitle'),
+  previewDeleteTaskBtn: document.querySelector('#previewDeleteTaskBtn'),
   taskOverview: document.querySelector('#taskOverview'),
   agentList: document.querySelector('#agentList'),
   chatArea: document.querySelector('#chatArea'),
@@ -35,6 +36,7 @@ const refs = {
   chatInput: document.querySelector('#chatInput'),
   sendChatBtn: document.querySelector('#sendChatBtn'),
   backToBoardBtn: document.querySelector('#backToBoardBtn'),
+  detailDeleteTaskBtn: document.querySelector('#detailDeleteTaskBtn'),
   refreshButton: document.querySelector('#refreshButton'),
   detailTitle: document.querySelector('#detailTitle'),
   themeToggle: document.querySelector('#themeToggle'),
@@ -70,6 +72,8 @@ function bindEvents() {
   refs.backToBoardBtn.addEventListener('click', () => {
     window.location.hash = '';
   });
+  refs.detailDeleteTaskBtn.addEventListener('click', deleteSelectedTask);
+  refs.previewDeleteTaskBtn.addEventListener('click', deleteSelectedTask);
   window.addEventListener('hashchange', () => {
     syncRouteSelection();
     render();
@@ -416,12 +420,14 @@ function renderTaskPreview() {
 
   if (!task) {
     refs.previewTitle.textContent = 'No task selected';
+    refs.previewDeleteTaskBtn.hidden = true;
     refs.taskPreview.classList.add('empty');
     refs.taskPreview.innerHTML = 'Select a task to view details.';
     return;
   }
 
   refs.previewTitle.textContent = task.title;
+  refs.previewDeleteTaskBtn.hidden = false;
   refs.taskPreview.classList.remove('empty');
   refs.taskPreview.innerHTML = `
     <section class="task-brief">
@@ -431,12 +437,10 @@ function renderTaskPreview() {
       <p>${escapeHtml(task.description)}</p>
       ${task.notes ? `<p class="notes">${escapeHtml(task.notes)}</p>` : ''}
       <div class="task-actions">
-        <button id="deleteTaskBtn" class="danger-button" type="button">Delete</button>
         <button id="openTaskDetailBtn" class="primary-button" type="button">Open Detail</button>
       </div>
     </section>
   `;
-  document.querySelector('#deleteTaskBtn').addEventListener('click', deleteSelectedTask);
   document.querySelector('#openTaskDetailBtn').addEventListener('click', () => {
     state.activeDetailTab = 'chat';
     window.location.hash = `#/tasks/${task.id}`;
@@ -507,10 +511,12 @@ function renderChat() {
     refs.chatArea.classList.add('empty');
     refs.chatArea.innerHTML = 'Select a task to start chatting.';
     refs.chatInputArea.hidden = true;
+    refs.detailDeleteTaskBtn.hidden = true;
     return;
   }
 
   refs.detailTitle.textContent = task.title;
+  refs.detailDeleteTaskBtn.hidden = false;
   renderTaskOverview(task);
   renderDetailTabs();
   refs.chatArea.classList.remove('empty');

@@ -163,6 +163,32 @@ h1 {
   border-color: var(--border-strong);
 }
 
+.icon-danger-button {
+  display: inline-grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: var(--radius);
+  color: var(--danger);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--danger), transparent 55%);
+}
+
+.icon-danger-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger), transparent 90%);
+  border-color: var(--danger);
+}
+
+.icon-danger-button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .danger-button {
   background: transparent;
   color: var(--danger);
@@ -498,10 +524,19 @@ h1 {
   box-shadow: var(--shadow);
 }
 
+.detail-title-block {
+  min-width: 0;
+}
+
 .detail-toolbar h2 {
   margin-top: 4px;
   font-size: 24px;
   line-height: 1.2;
+}
+
+.detail-delete-button {
+  margin-left: auto;
+  flex: 0 0 auto;
 }
 
 .detail-layout {
@@ -1078,5 +1113,10 @@ textarea:focus {
   .board-header,
   .detail-toolbar {
     display: grid;
+  }
+
+  .detail-delete-button {
+    margin-left: 0;
+    justify-self: end;
   }
 }
