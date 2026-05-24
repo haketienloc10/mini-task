@@ -1,6 +1,6 @@
 ---
 name: grill-me
-description: Khai phá ý định còn sơ khai của user; dẫn dắt, nghiên cứu, mở rộng có kiểm soát, và làm ý tưởng rõ hơn mà không lệch khỏi hướng ban đầu.
+description: Khai phá ý định còn sơ khai của user; dẫn dắt, nghiên cứu, mở rộng có kiểm soát, và làm ý tưởng rõ hơn mà không lệch khỏi hướng ban đầu. Dùng cho yêu cầu cần làm rõ trước khi làm, như new feature, change request, bug fix, refactor, workflow, product idea, task kỹ thuật, hoặc các yêu cầu còn mơ hồ; không dùng cho hỏi đáp nhanh hoặc trò chuyện thông thường.
 ---
 
 # grill-me

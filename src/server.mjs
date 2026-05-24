@@ -12,10 +12,28 @@ const publicDir = path.resolve(__dirname, '..', 'public');
 
 export function createServer({ store = new TaskStore(), runnerOptions = {} } = {}) {
   const terminalClients = new Map();
+  const taskClients = new Set();
   const publishTerminalEvent = (taskId, event) => {
     for (const res of terminalClients.get(taskId) ?? []) {
-      sendSseEvent(res, event);
+      sendSseEvent(res, 'terminal', event, event.id);
     }
+  };
+  const publishTaskEvent = (type, task) => {
+    if (!task) return;
+    for (const res of taskClients) {
+      sendSseEvent(res, type, task);
+    }
+  };
+  const streamingStore = {
+    getProject: (...args) => store.getProject(...args),
+    createRunArtifact: (...args) => store.createRunArtifact(...args),
+    writeRunFile: (...args) => store.writeRunFile(...args),
+    updateTask: async (...args) => {
+      const task = await store.updateTask(...args);
+      publishTaskEvent('task-updated', task);
+      return task;
+    },
+    appendTerminalEvent: (...args) => store.appendTerminalEvent(...args)
   };
 
   const server = http.createServer(async (req, res) => {
@@ -53,12 +71,29 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
         return sendJson(res, 200, await store.listTasks());
       }
 
+      if (req.method === 'GET' && url.pathname === '/api/tasks/events') {
+        res.writeHead(200, {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-cache, no-transform',
+          connection: 'keep-alive'
+        });
+        res.write('retry: 1000\n\n');
+        sendSseEvent(res, 'task-snapshot', await store.listTasks());
+
+        taskClients.add(res);
+        req.on('close', () => {
+          taskClients.delete(res);
+        });
+        return;
+      }
+
       if (req.method === 'POST' && url.pathname === '/api/tasks') {
         const body = await readJson(req);
         const validation = await validateTaskInput(body, store, runnerOptions);
         if (validation) return sendJson(res, 400, { error: validation });
         try {
           const task = await store.createTask(body);
+          publishTaskEvent('task-created', task);
           return sendJson(res, 201, task);
         } catch (error) {
           return sendJson(res, 400, { error: error.message });
@@ -88,7 +123,7 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
         if (!terminalClients.has(taskId)) terminalClients.set(taskId, new Set());
         terminalClients.get(taskId).add(res);
         for (const event of task.terminalEvents || []) {
-          sendSseEvent(res, event);
+          sendSseEvent(res, 'terminal', event, event.id);
         }
         req.on('close', () => {
           const clients = terminalClients.get(taskId);
@@ -161,7 +196,8 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
           error: '',
           tokenUsage: null
         });
-        runTask(taskForRun, store, runOptions).catch((error) => {
+        publishTaskEvent('task-updated', startedTask);
+        runTask(taskForRun, streamingStore, runOptions).catch((error) => {
           console.error(`Background task run failed for ${task.id}:`, error);
         });
         return sendJson(res, 202, startedTask);
@@ -233,10 +269,10 @@ function sendText(res, status, body) {
   res.end(body);
 }
 
-function sendSseEvent(res, event) {
-  res.write(`id: ${event.id}\n`);
-  res.write('event: terminal\n');
-  res.write(`data: ${JSON.stringify(event)}\n\n`);
+function sendSseEvent(res, eventName, data, id = randomUUID()) {
+  res.write(`id: ${id}\n`);
+  res.write(`event: ${eventName}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

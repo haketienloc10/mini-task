@@ -134,6 +134,73 @@ test('HTTP API streams terminal events for a running task', async () => {
   }
 });
 
+test('HTTP API streams task lifecycle updates', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codex-task-lifecycle-sse-'));
+  const workspace = await mkdtemp(path.join(root, 'workspace-'));
+  const homeCodexDir = await createCodexAgents(root, ['generator']);
+  const store = new TaskStore({ dataDir: path.join(root, 'data') });
+  const server = createServer({
+    store,
+    runnerOptions: {
+      command: process.execPath,
+      args: [path.resolve('scripts/fake-codex-runner.mjs')],
+      homeCodexDir,
+      timeoutMs: 5000
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const controller = new AbortController();
+
+  try {
+    const project = await request(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      body: JSON.stringify({ name: 'Lifecycle Project', workspacePath: workspace })
+    });
+
+    const streamResponse = await fetch(`${baseUrl}/api/tasks/events`, {
+      signal: controller.signal
+    });
+    assert.equal(streamResponse.ok, true);
+    assert.match(streamResponse.headers.get('content-type'), /text\/event-stream/);
+
+    let taskId;
+    const updatesPromise = readTerminalEvents(streamResponse, (events) => {
+      const taskEvents = taskId ? events.filter((task) => task.id === taskId) : events;
+      return taskEvents.some((task) => task.status === 'Assigned')
+        && taskEvents.some((task) => task.status === 'Running')
+        && taskEvents.some((task) => task.status === 'Done');
+    });
+
+    const task = await request(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      body: JSON.stringify({
+        projectId: project.id,
+        title: 'Lifecycle stream task',
+        description: 'Stream task status',
+        subagent: 'generator',
+        notes: ''
+      })
+    });
+    taskId = task.id;
+
+    const startedRun = await request(`${baseUrl}/api/tasks/${task.id}/run`, { method: 'POST' });
+    assert.equal(startedRun.status, 'Running');
+
+    const events = await Promise.race([
+      updatesPromise,
+      delay(3000).then(() => assert.fail('Timed out waiting for task lifecycle SSE events'))
+    ]);
+    const taskEvents = events.filter((event) => event.id === task.id);
+    assert.deepEqual([...new Set(taskEvents.map((event) => event.status))], ['Assigned', 'Running', 'Done']);
+  } finally {
+    controller.abort();
+    await new Promise((resolve) => server.close(resolve));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('HTTP API exposes, accepts, and runs default task mode', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'codex-task-dispatch-api-default-mode-'));
   const workspace = await mkdtemp(path.join(root, 'workspace-'));

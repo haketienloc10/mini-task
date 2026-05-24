@@ -683,6 +683,30 @@ h1 {
   gap: 12px;
 }
 
+.terminal-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.terminal-toolbar button {
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--text-soft);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.terminal-toolbar button.active,
+.terminal-toolbar button:hover {
+  color: var(--text);
+  background: var(--surface-strong);
+  border-color: var(--border-strong);
+}
+
 .terminal-run {
   overflow: hidden;
   background: #080b0f;
@@ -737,6 +761,21 @@ html[data-theme="light"] .terminal-run {
 
 .terminal-line.exit span {
   color: #86efac;
+}
+
+.terminal-line.agent span {
+  color: #c4b5fd;
+}
+
+.terminal-line.tool span,
+.terminal-line.item span {
+  color: #fcd34d;
+}
+
+.terminal-line.thread span,
+.terminal-line.turn span,
+.terminal-line.usage span {
+  color: #93c5fd;
 }
 
 .terminal-line code {

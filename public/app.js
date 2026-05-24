@@ -1,6 +1,4 @@
 const BOARD_STATUSES = ['Assigned', 'Running', 'Done', 'Failed'];
-const ACTIVE_POLL_INTERVAL_MS = 2000;
-const IDLE_POLL_INTERVAL_MS = 15000;
 
 const state = {
   projects: [],
@@ -9,11 +7,12 @@ const state = {
   selectedProjectId: null,
   selectedTaskId: null,
   activeDetailTab: 'chat',
+  terminalViewMode: 'pretty',
+  taskEventSource: null,
   terminalEventSource: null,
   terminalStreamTaskId: null
 };
 
-let pollTimer = null;
 let isLoadingData = false;
 
 const refs = {
@@ -61,7 +60,7 @@ async function init() {
   bindEvents();
   syncThemeToggle();
   await loadData();
-  scheduleSmartPolling();
+  syncTaskStream();
 }
 
 function bindEvents() {
@@ -76,9 +75,10 @@ function bindEvents() {
   });
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
-      clearTimeout(pollTimer);
+      closeTaskStream();
       return;
     }
+    syncTaskStream();
     loadData().catch((error) => console.error(error));
   });
 
@@ -119,6 +119,12 @@ function bindEvents() {
       event.preventDefault();
       sendChatMessage();
     }
+  });
+  refs.chatArea.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-terminal-view-mode]');
+    if (!button) return;
+    state.terminalViewMode = button.dataset.terminalViewMode;
+    renderChat();
   });
 }
 
@@ -177,33 +183,13 @@ async function loadData() {
       state.selectedProjectId = null;
     }
 
-    const projectTasks = selectedProjectTasks();
-    if (!isTaskDetailRoute() && projectTasks.length && !projectTasks.some((task) => task.id === state.selectedTaskId)) {
-      state.selectedTaskId = projectTasks[0].id;
-    }
-    if (!projectTasks.length) {
-      state.selectedTaskId = null;
-    }
+    ensureSelectedTask();
 
     await loadSubagents(state.selectedProjectId);
     render();
   } finally {
     isLoadingData = false;
-    scheduleSmartPolling();
   }
-}
-
-function scheduleSmartPolling() {
-  clearTimeout(pollTimer);
-  if (document.hidden) return;
-
-  const interval = state.tasks.some((task) => task.status === 'Running')
-    ? ACTIVE_POLL_INTERVAL_MS
-    : IDLE_POLL_INTERVAL_MS;
-
-  pollTimer = setTimeout(() => {
-    loadData().catch((error) => console.error(error));
-  }, interval);
 }
 
 async function loadSubagents(projectId) {
@@ -220,6 +206,11 @@ function renderSubagentOptions() {
 function render() {
   refs.newTaskBtn.disabled = !state.projects.length;
   renderRoute();
+  renderTaskData();
+  syncTerminalStream();
+}
+
+function renderTaskData() {
   renderMetrics();
   renderProjects();
   renderProjectOverview();
@@ -227,6 +218,52 @@ function render() {
   renderTaskPreview();
   renderAgents();
   renderChat();
+}
+
+function syncTaskStream() {
+  if (document.hidden || state.taskEventSource) return;
+
+  state.taskEventSource = new EventSource('/api/tasks/events');
+  state.taskEventSource.addEventListener('task-snapshot', (event) => {
+    state.tasks = JSON.parse(event.data);
+    syncRouteSelection();
+    ensureSelectedTask();
+    renderTaskData();
+    syncTerminalStream();
+  });
+  state.taskEventSource.addEventListener('task-created', (event) => {
+    mergeTask(JSON.parse(event.data));
+  });
+  state.taskEventSource.addEventListener('task-updated', (event) => {
+    mergeTask(JSON.parse(event.data));
+  });
+  state.taskEventSource.addEventListener('error', () => {
+    if (state.taskEventSource?.readyState === EventSource.CLOSED) {
+      closeTaskStream();
+    }
+  });
+}
+
+function closeTaskStream() {
+  state.taskEventSource?.close();
+  state.taskEventSource = null;
+}
+
+function mergeTask(task) {
+  const index = state.tasks.findIndex((candidate) => candidate.id === task.id);
+  if (index === -1) {
+    state.tasks = [task, ...state.tasks];
+  } else {
+    state.tasks = [
+      ...state.tasks.slice(0, index),
+      task,
+      ...state.tasks.slice(index + 1)
+    ];
+  }
+  state.tasks.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+  syncRouteSelection();
+  ensureSelectedTask();
+  renderTaskData();
   syncTerminalStream();
 }
 
@@ -568,6 +605,10 @@ function renderTerminalDetail(task) {
 
   return `
     <section class="terminal-panel">
+      <div class="terminal-toolbar" role="group" aria-label="Terminal log view">
+        <button class="${state.terminalViewMode === 'pretty' ? 'active' : ''}" data-terminal-view-mode="pretty" type="button">Pretty</button>
+        <button class="${state.terminalViewMode === 'raw' ? 'active' : ''}" data-terminal-view-mode="raw" type="button">Raw</button>
+      </div>
       ${[...runs.entries()].map(([runRef, runEvents]) => `
         <article class="terminal-run">
           <div class="terminal-run-header">
@@ -575,7 +616,9 @@ function renderTerminalDetail(task) {
             <span>${escapeHtml(formatDate(runEvents[0]?.createdAt))}</span>
           </div>
           <div class="terminal-log">
-            ${runEvents.map(renderTerminalEvent).join('')}
+            ${state.terminalViewMode === 'raw'
+              ? runEvents.map(renderRawTerminalEvent).join('')
+              : renderPrettyTerminalEvents(runEvents)}
           </div>
         </article>
       `).join('')}
@@ -583,7 +626,7 @@ function renderTerminalDetail(task) {
   `;
 }
 
-function renderTerminalEvent(event) {
+function renderRawTerminalEvent(event) {
   if (event.type === 'process.started') {
     return terminalLine('cmd', [
       `$ ${[event.command, ...(event.args || [])].filter(Boolean).join(' ')}`,
@@ -609,6 +652,118 @@ function renderTerminalEvent(event) {
   }
 
   return terminalLine('event', JSON.stringify(event));
+}
+
+function renderPrettyTerminalEvents(events) {
+  return events.flatMap((event) => {
+    if (event.type === 'process.started') {
+      return terminalLine('cmd', [
+        `$ ${[event.command, ...(event.args || [])].filter(Boolean).join(' ')}`,
+        `cwd: ${event.cwd || 'N/A'}`,
+        `pid: ${event.processRef || 'N/A'}`
+      ].join('\n'));
+    }
+
+    if (event.type === 'process.exited') {
+      return terminalLine(event.exitCode === 0 ? 'exit' : 'error', `Process exited with code ${event.exitCode}`);
+    }
+
+    if (event.type === 'process.timeout') {
+      return terminalLine('error', `Process timed out after ${formatDuration(event.timeoutMs)}`);
+    }
+
+    if (event.type === 'error') {
+      return terminalLine('error', event.message || 'Process error');
+    }
+
+    if (event.type !== 'output') {
+      return terminalLine('event', JSON.stringify(event));
+    }
+
+    if (event.stream === 'stderr') {
+      return splitTerminalText(event.data).map((line) => terminalLine('stderr', line)).join('');
+    }
+
+    return renderPrettyStdout(event.data);
+  }).join('');
+}
+
+function renderPrettyStdout(text) {
+  return splitTerminalText(text).map((line) => {
+    const parsed = parseJsonLine(line);
+    if (!parsed) return terminalLine('stdout', line);
+    return renderCodexJsonEvent(parsed, line);
+  }).join('');
+}
+
+function renderCodexJsonEvent(event, fallback) {
+  if (event.type === 'thread.started') {
+    return terminalLine('thread', `Started session ${event.thread_id || 'N/A'}`);
+  }
+
+  if (event.type === 'turn.started') {
+    return terminalLine('turn', 'Started');
+  }
+
+  if (event.type === 'turn.completed') {
+    return terminalLine('usage', formatUsage(event.usage));
+  }
+
+  if (event.type === 'item.started') {
+    return terminalLine('item', formatItem(event.item, 'Started'));
+  }
+
+  if (event.type === 'item.completed') {
+    return terminalLine(itemKind(event.item), formatItem(event.item, 'Completed'));
+  }
+
+  return terminalLine('event', fallback);
+}
+
+function formatItem(item, action) {
+  if (!item) return action;
+  if (item.type === 'agent_message') {
+    return [action, item.text].filter(Boolean).join('\n');
+  }
+  if (item.type === 'tool_call') {
+    return [action, item.name, item.arguments].filter(Boolean).join('\n');
+  }
+  if (item.type === 'tool_call_output') {
+    return [action, item.output].filter(Boolean).join('\n');
+  }
+  return `${action} ${item.type || 'item'}`;
+}
+
+function itemKind(item) {
+  if (item?.type === 'agent_message') return 'agent';
+  if (item?.type === 'tool_call' || item?.type === 'tool_call_output') return 'tool';
+  return 'item';
+}
+
+function formatUsage(usage) {
+  if (!usage) return 'Completed';
+  const input = formatTokenCount(usage.input_tokens);
+  const output = formatTokenCount(usage.output_tokens);
+  const total = formatTokenCount(usage.total_tokens);
+  return `${total} tokens · input ${input} · output ${output}`;
+}
+
+function formatDuration(ms) {
+  if (!Number.isFinite(ms)) return 'N/A';
+  if (ms < 1000) return `${ms}ms`;
+  return `${Math.round(ms / 1000)}s`;
+}
+
+function splitTerminalText(text) {
+  return String(text || '').split(/\r?\n/).filter((line) => line.length);
+}
+
+function parseJsonLine(line) {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return null;
+  }
 }
 
 function terminalLine(kind, text) {
@@ -689,6 +844,16 @@ function selectedProjectTasks() {
 
 function tasksForProject(projectId) {
   return state.tasks.filter((task) => task.projectId === projectId);
+}
+
+function ensureSelectedTask() {
+  const projectTasks = selectedProjectTasks();
+  if (!isTaskDetailRoute() && projectTasks.length && !projectTasks.some((task) => task.id === state.selectedTaskId)) {
+    state.selectedTaskId = projectTasks[0].id;
+  }
+  if (!projectTasks.length) {
+    state.selectedTaskId = null;
+  }
 }
 
 function syncRouteSelection() {
