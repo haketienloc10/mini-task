@@ -169,6 +169,7 @@ export class TaskStore {
       log: '',
       error: '',
       tokenUsage: null,
+      terminalEvents: [],
       messages: []
     };
     const tasks = await this.#readTasks();
@@ -190,6 +191,20 @@ export class TaskStore {
     tasks[index] = {
       ...tasks[index],
       ...patch,
+      updatedAt: new Date().toISOString()
+    };
+    await this.#writeTasks(tasks);
+    return tasks[index];
+  }
+
+  async appendTerminalEvent(id, event) {
+    const tasks = await this.#readTasks();
+    const index = tasks.findIndex((task) => task.id === id);
+    if (index === -1) return null;
+
+    tasks[index] = {
+      ...tasks[index],
+      terminalEvents: [...(tasks[index].terminalEvents || []), event],
       updatedAt: new Date().toISOString()
     };
     await this.#writeTasks(tasks);

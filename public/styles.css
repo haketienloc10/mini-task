@@ -678,6 +678,74 @@ h1 {
   color: var(--text-soft);
 }
 
+.terminal-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.terminal-run {
+  overflow: hidden;
+  background: #080b0f;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+html[data-theme="light"] .terminal-run {
+  background: #111827;
+}
+
+.terminal-run-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  color: #d5dde7;
+  background: rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.terminal-run-header span {
+  color: #98a6b5;
+  font-size: 12px;
+}
+
+.terminal-log {
+  display: grid;
+  gap: 2px;
+  padding: 10px 0;
+}
+
+.terminal-line {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: 10px;
+  padding: 2px 12px;
+  color: #d5dde7;
+}
+
+.terminal-line span {
+  color: #7dd3fc;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.terminal-line.stderr span,
+.terminal-line.error span {
+  color: #fca5a5;
+}
+
+.terminal-line.exit span {
+  color: #86efac;
+}
+
+.terminal-line code {
+  min-width: 0;
+  color: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .task-brief {
   display: grid;
   gap: 12px;

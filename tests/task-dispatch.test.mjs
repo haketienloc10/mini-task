@@ -160,6 +160,10 @@ test('creates, runs, captures output, and isolates sessions per task', async () 
   assert.ok(firstResult.runArtifactPath);
   assert.ok(secondResult.runArtifactPath);
   assert.notEqual(firstResult.runArtifactPath, secondResult.runArtifactPath);
+  assert.equal(firstResult.terminalEvents.some((event) => event.type === 'process.started'), true);
+  assert.equal(firstResult.terminalEvents.some((event) => event.type === 'output' && event.stream === 'stdout' && /fake codex output/.test(event.data)), true);
+  assert.equal(firstResult.terminalEvents.some((event) => event.type === 'process.exited' && event.exitCode === 0), true);
+  assert.equal(firstResult.terminalEvents.every((event) => event.runRef === firstResult.currentRunRef || event.runRef), true);
 
   await rm(root, { recursive: true, force: true });
 });

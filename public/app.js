@@ -8,7 +8,9 @@ const state = {
   subagents: [],
   selectedProjectId: null,
   selectedTaskId: null,
-  activeDetailTab: 'chat'
+  activeDetailTab: 'chat',
+  terminalEventSource: null,
+  terminalStreamTaskId: null
 };
 
 let pollTimer = null;
@@ -225,6 +227,7 @@ function render() {
   renderTaskPreview();
   renderAgents();
   renderChat();
+  syncTerminalStream();
 }
 
 function renderRoute() {
@@ -429,6 +432,12 @@ function renderChat() {
     return;
   }
 
+  if (state.activeDetailTab === 'terminal') {
+    refs.chatArea.innerHTML = renderTerminalDetail(task);
+    refs.chatArea.scrollTop = refs.chatArea.scrollHeight;
+    return;
+  }
+
   if (state.activeDetailTab === 'activity') {
     refs.chatArea.innerHTML = renderActivityDetail(task);
     return;
@@ -542,6 +551,106 @@ function renderActivityDetail(task) {
       ${task.processRef ? `<article><strong>Process</strong><span>${escapeHtml(task.processRef)}</span></article>` : ''}
     </section>
   `;
+}
+
+function renderTerminalDetail(task) {
+  const events = task.terminalEvents || [];
+  if (!events.length) {
+    return '<section class="terminal-panel empty">No terminal events yet.</section>';
+  }
+
+  const runs = new Map();
+  for (const event of events) {
+    const runRef = event.runRef || 'unknown';
+    if (!runs.has(runRef)) runs.set(runRef, []);
+    runs.get(runRef).push(event);
+  }
+
+  return `
+    <section class="terminal-panel">
+      ${[...runs.entries()].map(([runRef, runEvents]) => `
+        <article class="terminal-run">
+          <div class="terminal-run-header">
+            <strong>Run ${escapeHtml(shortRef(runRef))}</strong>
+            <span>${escapeHtml(formatDate(runEvents[0]?.createdAt))}</span>
+          </div>
+          <div class="terminal-log">
+            ${runEvents.map(renderTerminalEvent).join('')}
+          </div>
+        </article>
+      `).join('')}
+    </section>
+  `;
+}
+
+function renderTerminalEvent(event) {
+  if (event.type === 'process.started') {
+    return terminalLine('cmd', [
+      `$ ${[event.command, ...(event.args || [])].filter(Boolean).join(' ')}`,
+      `cwd: ${event.cwd || 'N/A'}`,
+      `pid: ${event.processRef || 'N/A'}`
+    ].join('\n'));
+  }
+
+  if (event.type === 'process.exited') {
+    return terminalLine('exit', `Process exited with code ${event.exitCode}`);
+  }
+
+  if (event.type === 'process.timeout') {
+    return terminalLine('error', `Process timed out after ${event.timeoutMs}ms`);
+  }
+
+  if (event.type === 'error') {
+    return terminalLine('error', event.message || 'Process error');
+  }
+
+  if (event.type === 'output') {
+    return terminalLine(event.stream === 'stderr' ? 'stderr' : 'stdout', event.data || '');
+  }
+
+  return terminalLine('event', JSON.stringify(event));
+}
+
+function terminalLine(kind, text) {
+  return `
+    <div class="terminal-line ${kind}">
+      <span>${escapeHtml(kind)}</span>
+      <code>${escapeHtml(text)}</code>
+    </div>
+  `;
+}
+
+function syncTerminalStream() {
+  const task = selectedTask();
+  if (!isTaskDetailRoute() || !task) {
+    closeTerminalStream();
+    return;
+  }
+  if (state.terminalStreamTaskId === task.id && state.terminalEventSource) return;
+
+  closeTerminalStream();
+  state.terminalStreamTaskId = task.id;
+  state.terminalEventSource = new EventSource(`/api/tasks/${encodeURIComponent(task.id)}/terminal-events`);
+  state.terminalEventSource.addEventListener('terminal', (event) => {
+    mergeTerminalEvent(task.id, JSON.parse(event.data));
+  });
+}
+
+function closeTerminalStream() {
+  state.terminalEventSource?.close();
+  state.terminalEventSource = null;
+  state.terminalStreamTaskId = null;
+}
+
+function mergeTerminalEvent(taskId, event) {
+  const task = state.tasks.find((candidate) => candidate.id === taskId);
+  if (!task) return;
+  const events = task.terminalEvents || [];
+  if (events.some((candidate) => candidate.id === event.id)) return;
+  task.terminalEvents = [...events, event];
+  if (state.activeDetailTab === 'terminal' && selectedTask()?.id === taskId) {
+    renderChat();
+  }
 }
 
 async function sendChatMessage() {
@@ -662,6 +771,10 @@ function tokenUsageForTask(task) {
 
 function formatTokenCount(value) {
   return Number.isFinite(value) ? new Intl.NumberFormat().format(value) : 'N/A';
+}
+
+function shortRef(value) {
+  return String(value || '').slice(0, 8);
 }
 
 function escapeHtml(value) {

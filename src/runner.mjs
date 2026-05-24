@@ -10,11 +10,30 @@ export async function runTask(task, store, options = {}) {
   const startedAt = new Date().toISOString();
   const runRef = randomUUID();
   const runArtifactPath = await store.createRunArtifact(task.id, runRef);
+  let terminalSequence = 0;
+  const emitTerminalEvent = async (event) => {
+    const terminalEvent = {
+      id: randomUUID(),
+      runRef,
+      sequence: terminalSequence++,
+      createdAt: new Date().toISOString(),
+      ...event
+    };
+    if (typeof store.appendTerminalEvent === 'function') {
+      await store.appendTerminalEvent(task.id, terminalEvent);
+    }
+    if (typeof options.onTerminalEvent === 'function') {
+      options.onTerminalEvent(task.id, terminalEvent);
+    }
+    return terminalEvent;
+  };
+
   await store.updateTask(task.id, {
     status: 'Running',
     startedAt,
     finishedAt: null,
     processRef: null,
+    currentRunRef: runRef,
     runArtifactPath,
     output: '',
     log: task.sessionRef ? `Resuming session ${task.sessionRef}\n` : 'Starting new session\n',
@@ -36,7 +55,7 @@ export async function runTask(task, store, options = {}) {
       runRef
     }, null, 2));
 
-    const result = await executeProcess(runner, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    const result = await executeProcess(runner, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, emitTerminalEvent);
     const finishedAt = new Date().toISOString();
     await store.writeRunFile(runArtifactPath, 'stdout.log', result.rawStdout ?? result.stdout);
     await store.writeRunFile(runArtifactPath, 'stderr.log', result.stderr);
@@ -58,6 +77,7 @@ export async function runTask(task, store, options = {}) {
       finishedAt,
       sessionRef,
       processRef: result.processRef,
+      currentRunRef: null,
       output: result.stdout,
       log: [
         task.sessionRef ? `Resumed session ${task.sessionRef}` : `Started session ${sessionRef}`,
@@ -72,6 +92,10 @@ export async function runTask(task, store, options = {}) {
   } catch (error) {
     const finishedAt = new Date().toISOString();
     await store.writeRunFile(runArtifactPath, 'error.log', error.stack ?? error.message);
+    await emitTerminalEvent({
+      type: 'error',
+      message: error.message
+    });
 
     const agentMessage = {
       id: randomUUID(),
@@ -85,6 +109,7 @@ export async function runTask(task, store, options = {}) {
       status: 'Failed',
       finishedAt,
       sessionRef: task.sessionRef ?? runRef,
+      currentRunRef: null,
       output: '',
       log: `${task.sessionRef ? `Resuming session ${task.sessionRef}` : 'Starting new session'}\nFailed before completion`,
       error: error.message,
@@ -172,8 +197,15 @@ function buildPrompt(task, subagent) {
   ].filter(Boolean).join('\n');
 }
 
-export function executeProcess(runner, timeoutMs) {
+export function executeProcess(runner, timeoutMs, onTerminalEvent) {
   return new Promise((resolve, reject) => {
+    let eventChain = Promise.resolve();
+    const emitTerminalEvent = (event) => {
+      eventChain = eventChain.then(() => Promise.resolve(onTerminalEvent?.(event)));
+      eventChain = eventChain.catch(() => {});
+      return eventChain;
+    };
+
     const child = spawn(runner.command, runner.args, {
       cwd: runner.cwd,
       env: runner.env,
@@ -184,16 +216,44 @@ export function executeProcess(runner, timeoutMs) {
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+
+    emitTerminalEvent({
+      type: 'process.started',
+      command: runner.command,
+      args: runner.args,
+      cwd: runner.cwd,
+      processRef
+    });
+
     const timer = setTimeout(() => {
       timedOut = true;
+      emitTerminalEvent({
+        type: 'process.timeout',
+        timeoutMs,
+        processRef
+      });
       child.kill('SIGTERM');
     }, timeoutMs);
 
     child.stdout.on('data', (chunk) => {
-      stdout += chunk.toString();
+      const text = chunk.toString();
+      stdout += text;
+      emitTerminalEvent({
+        type: 'output',
+        stream: 'stdout',
+        data: text,
+        processRef
+      });
     });
     child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
+      const text = chunk.toString();
+      stderr += text;
+      emitTerminalEvent({
+        type: 'output',
+        stream: 'stderr',
+        data: text,
+        processRef
+      });
     });
     if (runner.stdin) {
       child.stdin.end(runner.stdin);
@@ -202,29 +262,40 @@ export function executeProcess(runner, timeoutMs) {
     }
     child.on('error', (error) => {
       clearTimeout(timer);
-      reject(error);
+      emitTerminalEvent({
+        type: 'error',
+        message: error.message,
+        processRef
+      }).finally(() => reject(error));
     });
     child.on('close', (exitCode) => {
-      clearTimeout(timer);
-      if (timedOut) {
-        reject(new Error(`Process timed out after ${timeoutMs}ms`));
-        return;
-      }
-      if (!runner.parseJsonOutput) {
-        resolve({ exitCode, stdout, stderr, processRef });
-        return;
-      }
+      (async () => {
+        clearTimeout(timer);
+        await emitTerminalEvent({
+          type: 'process.exited',
+          exitCode,
+          processRef
+        });
+        if (timedOut) {
+          reject(new Error(`Process timed out after ${timeoutMs}ms`));
+          return;
+        }
+        if (!runner.parseJsonOutput) {
+          resolve({ exitCode, stdout, stderr, processRef });
+          return;
+        }
 
-      const parsed = parseCodexJsonOutput(stdout);
-      resolve({
-        exitCode,
-        stdout: parsed.finalMessage || stdout,
-        rawStdout: stdout,
-        stderr,
-        processRef,
-        sessionRef: parsed.sessionRef,
-        tokenUsage: parsed.tokenUsage
-      });
+        const parsed = parseCodexJsonOutput(stdout);
+        resolve({
+          exitCode,
+          stdout: parsed.finalMessage || stdout,
+          rawStdout: stdout,
+          stderr,
+          processRef,
+          sessionRef: parsed.sessionRef,
+          tokenUsage: parsed.tokenUsage
+        });
+      })().catch(reject);
     });
   });
 }

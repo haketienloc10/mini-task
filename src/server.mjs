@@ -11,6 +11,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, '..', 'public');
 
 export function createServer({ store = new TaskStore(), runnerOptions = {} } = {}) {
+  const terminalClients = new Map();
+  const publishTerminalEvent = (taskId, event) => {
+    for (const res of terminalClients.get(taskId) ?? []) {
+      sendSseEvent(res, event);
+    }
+  };
+
   const server = http.createServer(async (req, res) => {
     try {
       await store.init();
@@ -65,6 +72,33 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
         return sendJson(res, 200, task);
       }
 
+      const terminalEventsMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/terminal-events$/);
+      if (req.method === 'GET' && terminalEventsMatch) {
+        const taskId = terminalEventsMatch[1];
+        const task = await store.getTask(taskId);
+        if (!task) return sendJson(res, 404, { error: 'Task not found' });
+
+        res.writeHead(200, {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-cache, no-transform',
+          connection: 'keep-alive'
+        });
+        res.write('retry: 1000\n\n');
+
+        if (!terminalClients.has(taskId)) terminalClients.set(taskId, new Set());
+        terminalClients.get(taskId).add(res);
+        for (const event of task.terminalEvents || []) {
+          sendSseEvent(res, event);
+        }
+        req.on('close', () => {
+          const clients = terminalClients.get(taskId);
+          if (!clients) return;
+          clients.delete(res);
+          if (!clients.size) terminalClients.delete(taskId);
+        });
+        return;
+      }
+
       const runMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/run$/);
       if (req.method === 'POST' && runMatch) {
         const task = await store.getTask(runMatch[1]);
@@ -109,6 +143,13 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
             runOptions = { ...runnerOptions, customPrompt: lastUserMsg?.content };
           }
         }
+        runOptions = {
+          ...runOptions,
+          onTerminalEvent(taskId, event) {
+            runnerOptions.onTerminalEvent?.(taskId, event);
+            publishTerminalEvent(taskId, event);
+          }
+        };
         const startedTask = await store.updateTask(task.id, {
           messages: taskForRun.messages,
           status: 'Running',
@@ -190,6 +231,12 @@ function sendJson(res, status, data) {
 function sendText(res, status, body) {
   res.writeHead(status, { 'content-type': 'text/plain; charset=utf-8' });
   res.end(body);
+}
+
+function sendSseEvent(res, event) {
+  res.write(`id: ${event.id}\n`);
+  res.write('event: terminal\n');
+  res.write(`data: ${JSON.stringify(event)}\n\n`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

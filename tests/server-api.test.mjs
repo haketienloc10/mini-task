@@ -68,6 +68,72 @@ test('HTTP API creates, lists, details, and runs a task', async () => {
   }
 });
 
+test('HTTP API streams terminal events for a running task', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codex-task-terminal-sse-'));
+  const workspace = await mkdtemp(path.join(root, 'workspace-'));
+  const homeCodexDir = await createCodexAgents(root, ['generator']);
+  const store = new TaskStore({ dataDir: path.join(root, 'data') });
+  const server = createServer({
+    store,
+    runnerOptions: {
+      command: process.execPath,
+      args: [path.resolve('scripts/fake-codex-runner.mjs')],
+      homeCodexDir,
+      timeoutMs: 5000
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const controller = new AbortController();
+
+  try {
+    const project = await request(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      body: JSON.stringify({ name: 'Terminal Project', workspacePath: workspace })
+    });
+    const task = await request(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      body: JSON.stringify({
+        projectId: project.id,
+        title: 'Terminal stream task',
+        description: 'Stream terminal output',
+        subagent: 'generator',
+        notes: ''
+      })
+    });
+
+    const streamResponse = await fetch(`${baseUrl}/api/tasks/${task.id}/terminal-events`, {
+      signal: controller.signal
+    });
+    assert.equal(streamResponse.ok, true);
+    assert.match(streamResponse.headers.get('content-type'), /text\/event-stream/);
+
+    const eventsPromise = readTerminalEvents(streamResponse, (events) => {
+      return events.some((event) => event.type === 'output' && /fake codex output/.test(event.data))
+        && events.some((event) => event.type === 'process.exited' && event.exitCode === 0);
+    });
+
+    const startedRun = await request(`${baseUrl}/api/tasks/${task.id}/run`, { method: 'POST' });
+    assert.equal(startedRun.status, 'Running');
+
+    const events = await Promise.race([
+      eventsPromise,
+      delay(3000).then(() => assert.fail('Timed out waiting for terminal SSE events'))
+    ]);
+    assert.equal(events.some((event) => event.type === 'process.started'), true);
+    assert.equal(events.some((event) => event.type === 'output' && event.stream === 'stdout'), true);
+    assert.equal(events.some((event) => event.type === 'process.exited'), true);
+
+    const run = await waitForTaskStatus(baseUrl, task.id, 'Done');
+    assert.equal(run.terminalEvents.length >= events.length, true);
+  } finally {
+    controller.abort();
+    await new Promise((resolve) => server.close(resolve));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('HTTP API exposes, accepts, and runs default task mode', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'codex-task-dispatch-api-default-mode-'));
   const workspace = await mkdtemp(path.join(root, 'workspace-'));
@@ -493,6 +559,31 @@ async function waitForTaskStatus(baseUrl, taskId, status, timeoutMs = 5000) {
   }
 
   assert.fail(`Timed out waiting for task ${taskId} to reach ${status}; last status was ${task?.status}`);
+}
+
+async function readTerminalEvents(response, isComplete) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const events = [];
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) return events;
+    buffer += decoder.decode(value, { stream: true });
+
+    let boundary = buffer.indexOf('\n\n');
+    while (boundary !== -1) {
+      const frame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const dataLine = frame.split('\n').find((line) => line.startsWith('data: '));
+      if (dataLine) {
+        events.push(JSON.parse(dataLine.slice(6)));
+        if (isComplete(events)) return events;
+      }
+      boundary = buffer.indexOf('\n\n');
+    }
+  }
 }
 
 async function createCodexAgents(root, names) {
