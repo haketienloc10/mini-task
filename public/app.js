@@ -44,11 +44,6 @@ const refs = {
 await init();
 
 async function init() {
-  state.subagents = await api('/api/subagents');
-  refs.taskSubagentSelect.innerHTML = state.subagents
-    .map((subagent) => `<option value="${subagent.id}">${escapeHtml(subagent.label)}</option>`)
-    .join('');
-
   bindEvents();
   syncThemeToggle();
   await loadData();
@@ -61,10 +56,12 @@ function bindEvents() {
   refs.newProjectBtn.addEventListener('click', () => openModal(refs.projectModal, refs.projectFormMessage));
   refs.closeProjectModal.addEventListener('click', () => closeModal(refs.projectModal));
 
-  refs.newTaskBtn.addEventListener('click', () => {
+  refs.newTaskBtn.addEventListener('click', async () => {
     refs.taskProjectSelect.innerHTML = state.projects
       .map((project) => `<option value="${project.id}" ${project.id === state.selectedProjectId ? 'selected' : ''}>${escapeHtml(project.name)}</option>`)
       .join('');
+    await loadSubagents(refs.taskProjectSelect.value);
+    renderSubagentOptions();
     openModal(refs.taskModal, refs.formMessage);
   });
   refs.closeTaskModal.addEventListener('click', () => closeModal(refs.taskModal));
@@ -76,6 +73,10 @@ function bindEvents() {
 
   refs.projectForm.addEventListener('submit', createProject);
   refs.taskForm.addEventListener('submit', createTask);
+  refs.taskProjectSelect.addEventListener('change', async () => {
+    await loadSubagents(refs.taskProjectSelect.value);
+    renderSubagentOptions();
+  });
   refs.sendChatBtn.addEventListener('click', sendChatMessage);
   refs.chatInput.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -142,7 +143,19 @@ async function loadData() {
     state.selectedTaskId = null;
   }
 
+  await loadSubagents(state.selectedProjectId);
   render();
+}
+
+async function loadSubagents(projectId) {
+  const suffix = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+  state.subagents = await api(`/api/subagents${suffix}`);
+}
+
+function renderSubagentOptions() {
+  refs.taskSubagentSelect.innerHTML = state.subagents
+    .map((subagent) => `<option value="${subagent.id}">${escapeHtml(subagent.label)}</option>`)
+    .join('');
 }
 
 function render() {
@@ -192,7 +205,7 @@ function renderProjects() {
       state.selectedProjectId = button.dataset.projectId;
       const tasks = selectedProjectTasks();
       state.selectedTaskId = tasks[0]?.id ?? null;
-      render();
+      loadSubagents(state.selectedProjectId).then(render);
     });
   });
 }

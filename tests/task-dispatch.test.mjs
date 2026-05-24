@@ -10,6 +10,7 @@ test('builds default codex exec command without deprecated cwd argument', async 
   const root = await mkdtemp(path.join(tmpdir(), 'codex-task-dispatch-command-'));
   const workspace = await mkdtemp(path.join(root, 'workspace-'));
   const runArtifactPath = path.join(root, 'run');
+  const homeCodexDir = await createCodexAgents(root, ['generator']);
 
   const runner = buildRunnerCommand({
     title: 'Default command',
@@ -17,7 +18,7 @@ test('builds default codex exec command without deprecated cwd argument', async 
     workspacePath: workspace,
     subagent: 'generator',
     notes: ''
-  }, runArtifactPath);
+  }, runArtifactPath, { homeCodexDir });
 
   assert.equal(runner.command, 'codex');
   assert.deepEqual(runner.args, [
@@ -110,6 +111,7 @@ test('parses codex json output session and final message', () => {
 test('creates, runs, captures output, and isolates sessions per task', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'codex-task-dispatch-'));
   const workspace = await mkdtemp(path.join(root, 'workspace-'));
+  const homeCodexDir = await createCodexAgents(root, ['generator', 'reviewer']);
   const store = new TaskStore({ dataDir: path.join(root, 'data') });
   await store.init();
 
@@ -136,6 +138,7 @@ test('creates, runs, captures output, and isolates sessions per task', async () 
   const runnerOptions = {
     command: process.execPath,
     args: [path.resolve('scripts/fake-codex-runner.mjs')],
+    homeCodexDir,
     timeoutMs: 5000
   };
   const firstResult = await runTask(first, store, runnerOptions);
@@ -222,6 +225,7 @@ test('marks task failed when workspace is invalid', async () => {
 test('marks task failed when runner exits with non-zero code', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'codex-task-dispatch-'));
   const workspace = await mkdtemp(path.join(root, 'workspace-'));
+  const homeCodexDir = await createCodexAgents(root, ['evaluator']);
   const store = new TaskStore({ dataDir: path.join(root, 'data') });
   await store.init();
 
@@ -238,6 +242,7 @@ test('marks task failed when runner exits with non-zero code', async () => {
   const result = await runTask(task, store, {
     command: process.execPath,
     args: [path.resolve('scripts/fake-codex-runner.mjs'), 'fail'],
+    homeCodexDir,
     timeoutMs: 5000
   });
 
@@ -301,6 +306,7 @@ test('runTask uses the project workspace instead of task-level workspace', async
   const root = await mkdtemp(path.join(tmpdir(), 'codex-task-project-workspace-'));
   const projectWorkspace = await mkdtemp(path.join(root, 'project-workspace-'));
   const taskWorkspace = await mkdtemp(path.join(root, 'task-workspace-'));
+  const homeCodexDir = await createCodexAgents(root, ['generator']);
   const store = new TaskStore({ dataDir: path.join(root, 'data') });
   await store.init();
 
@@ -317,6 +323,7 @@ test('runTask uses the project workspace instead of task-level workspace', async
   const result = await runTask(task, store, {
     command: process.execPath,
     args: [path.resolve('scripts/fake-codex-runner.mjs')],
+    homeCodexDir,
     timeoutMs: 5000
   });
 
@@ -326,3 +333,22 @@ test('runTask uses the project workspace instead of task-level workspace', async
 
   await rm(root, { recursive: true, force: true });
 });
+
+async function createCodexAgents(root, names) {
+  const homeCodexDir = path.join(root, 'home-codex');
+  for (const name of names) {
+    const agentDir = path.join(homeCodexDir, name, 'agents');
+    await mkdir(agentDir, { recursive: true });
+    await writeFile(path.join(agentDir, 'openai.yaml'), [
+      'interface:',
+      `  display_name: "${titleCase(name)}"`,
+      `  short_description: "${name} test agent"`,
+      `  default_prompt: "harness_${name}"`
+    ].join('\n'), 'utf8');
+  }
+  return homeCodexDir;
+}
+
+function titleCase(value) {
+  return value.replace(/\b\w/g, (letter) => letter.toUpperCase());
+}

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -9,12 +9,14 @@ import { TaskStore } from '../src/taskStore.mjs';
 test('HTTP API creates, lists, details, and runs a task', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'codex-task-dispatch-api-'));
   const workspace = await mkdtemp(path.join(root, 'workspace-'));
+  const homeCodexDir = await createCodexAgents(root, ['generator']);
   const store = new TaskStore({ dataDir: path.join(root, 'data') });
   const server = createServer({
     store,
     runnerOptions: {
       command: process.execPath,
       args: [path.resolve('scripts/fake-codex-runner.mjs')],
+      homeCodexDir,
       timeoutMs: 5000
     }
   });
@@ -123,6 +125,7 @@ test('HTTP API exposes, accepts, and runs default task mode', async () => {
 test('HTTP API runs default codex command in the task workspace', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'codex-task-dispatch-api-default-'));
   const workspace = await mkdtemp(path.join(root, 'workspace-'));
+  const homeCodexDir = await createCodexAgents(root, ['generator']);
   const command = path.join(root, 'codex-shim.mjs');
   await writeFile(command, [
     '#!/usr/bin/env node',
@@ -144,6 +147,7 @@ test('HTTP API runs default codex command in the task workspace', async () => {
     store,
     runnerOptions: {
       command,
+      homeCodexDir,
       timeoutMs: 5000
     }
   });
@@ -202,8 +206,9 @@ test('HTTP API runs default codex command in the task workspace', async () => {
 
 test('HTTP API projects management', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'codex-task-projects-'));
+  const homeCodexDir = await createCodexAgents(root, ['generator']);
   const store = new TaskStore({ dataDir: path.join(root, 'data') });
-  const server = createServer({ store });
+  const server = createServer({ store, runnerOptions: { homeCodexDir } });
 
   await new Promise((resolve) => server.listen(0, resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -276,12 +281,14 @@ test('HTTP API projects management', async () => {
 test('HTTP API chat session interaction', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'codex-task-chat-'));
   const workspace = await mkdtemp(path.join(root, 'workspace-'));
+  const homeCodexDir = await createCodexAgents(root, ['generator']);
   const store = new TaskStore({ dataDir: path.join(root, 'data') });
   const server = createServer({
     store,
     runnerOptions: {
       command: process.execPath,
       args: [path.resolve('scripts/fake-codex-runner.mjs')],
+      homeCodexDir,
       timeoutMs: 5000
     }
   });
@@ -421,6 +428,37 @@ test('HTTP API resumes the existing codex session for follow-up chat', async () 
   }
 });
 
+test('HTTP API exposes project-scoped codex agents', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codex-task-subagents-api-'));
+  const workspace = await mkdtemp(path.join(root, 'workspace-'));
+  const homeCodexDir = await createCodexAgents(root, ['generator']);
+  await writeAgent(path.join(workspace, '.codex'), 'project-reviewer', 'Project Reviewer');
+  const store = new TaskStore({ dataDir: path.join(root, 'data') });
+  const server = createServer({ store, runnerOptions: { homeCodexDir } });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const project = await request(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      body: JSON.stringify({ name: 'Scoped Project', workspacePath: workspace })
+    });
+
+    const globalAgents = await request(`${baseUrl}/api/subagents`);
+    assert.equal(globalAgents.some((agent) => agent.id === 'generator'), true);
+    assert.equal(globalAgents.some((agent) => agent.id === 'project-reviewer'), false);
+
+    const projectAgents = await request(`${baseUrl}/api/subagents?projectId=${project.id}`);
+    assert.equal(projectAgents.some((agent) => agent.id === 'default'), true);
+    assert.equal(projectAgents.some((agent) => agent.id === 'generator'), true);
+    assert.equal(projectAgents.some((agent) => agent.id === 'project-reviewer'), true);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 async function request(url, options = {}) {
   const response = await fetch(url, {
     headers: { 'content-type': 'application/json' },
@@ -429,4 +467,27 @@ async function request(url, options = {}) {
   const data = await response.json();
   assert.equal(response.ok, true, data.error);
   return data;
+}
+
+async function createCodexAgents(root, names) {
+  const homeCodexDir = path.join(root, 'home-codex');
+  for (const name of names) {
+    await writeAgent(homeCodexDir, name, titleCase(name));
+  }
+  return homeCodexDir;
+}
+
+async function writeAgent(codexDir, id, label) {
+  const agentDir = path.join(codexDir, id, 'agents');
+  await mkdir(agentDir, { recursive: true });
+  await writeFile(path.join(agentDir, 'openai.yaml'), [
+    'interface:',
+    `  display_name: "${label}"`,
+    `  short_description: "${id} test agent"`,
+    `  default_prompt: "harness_${id}"`
+  ].join('\n'), 'utf8');
+}
+
+function titleCase(value) {
+  return value.replace(/[-_]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }

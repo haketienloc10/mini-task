@@ -115,7 +115,10 @@ async function resolveTaskWorkspacePath(task, store) {
 }
 
 export function buildRunnerCommand(task, runArtifactPath, options = {}) {
-  const subagent = findSubagent(task.subagent);
+  const subagent = findSubagent(task.subagent, {
+    homeCodexDir: options.homeCodexDir,
+    projectPath: task.workspacePath
+  });
   if (!subagent) {
     throw new Error(`Unknown subagent: ${task.subagent}`);
   }

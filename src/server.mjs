@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { TaskStore } from './taskStore.mjs';
 import { runTask } from './runner.mjs';
-import { findSubagent, SUBAGENTS } from './subagents.mjs';
+import { findSubagent, listSubagents } from './subagents.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, '..', 'public');
@@ -17,7 +17,13 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
       const url = new URL(req.url, `http://${req.headers.host}`);
 
       if (req.method === 'GET' && url.pathname === '/api/subagents') {
-        return sendJson(res, 200, SUBAGENTS);
+        const project = url.searchParams.get('projectId')
+          ? await store.getProject(url.searchParams.get('projectId'))
+          : null;
+        return sendJson(res, 200, listSubagents({
+          homeCodexDir: runnerOptions.homeCodexDir,
+          projectPath: project?.workspacePath
+        }));
       }
 
       if (req.method === 'GET' && url.pathname === '/api/projects') {
@@ -42,7 +48,7 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
 
       if (req.method === 'POST' && url.pathname === '/api/tasks') {
         const body = await readJson(req);
-        const validation = validateTaskInput(body);
+        const validation = await validateTaskInput(body, store, runnerOptions);
         if (validation) return sendJson(res, 400, { error: validation });
         try {
           const task = await store.createTask(body);
@@ -114,12 +120,16 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
   return server;
 }
 
-function validateTaskInput(body) {
+async function validateTaskInput(body, store, runnerOptions) {
   if (!body || typeof body !== 'object') return 'Request body must be an object';
   if (!body.projectId?.trim()) return 'Project ID is required';
   if (!body.title?.trim()) return 'Title is required';
   if (!body.description?.trim()) return 'Description is required';
-  if (!findSubagent(body.subagent)) return 'Subagent is required';
+  const project = await store.getProject(body.projectId);
+  if (!findSubagent(body.subagent, {
+    homeCodexDir: runnerOptions.homeCodexDir,
+    projectPath: project?.workspacePath
+  })) return 'Subagent is required';
   return null;
 }
 
