@@ -520,6 +520,28 @@ Format:
     #### Handoff Notes
     ...
 
+Sau khi Secretary tạo biên bản cuối phiên, phải hỏi user chọn bước tiếp theo.
+
+Không tự động tạo file hoặc execution handoff nếu user chưa chọn.
+
+Format:
+
+    ### 8. Lựa chọn tiếp theo
+
+    Secretary:
+    Biên bản cuộc họp đã hoàn tất. Anh muốn em xuất kết quả theo hướng nào?
+
+    1. Xuất biên bản cuộc họp thành file `.md`
+       - Phù hợp khi anh muốn lưu lại discussion, decision, disagreement, scope, risks, open questions.
+
+    2. Xuất `Execution Handoff`
+       - Phù hợp khi anh đã chốt hướng và muốn tạo contract đủ rõ để executor implement ngay.
+
+    3. Xuất cả 2
+       - Tạo cả biên bản cuộc họp và `Execution Handoff`.
+
+    Nếu còn open question blocking implementation, option 2 và 3 phải báo `BLOCKED` cho phần handoff thay vì tạo handoff giả.
+
 ## 12. Secretary Notes Throughout the Session
 
 Secretary hoạt động trong toàn bộ phiên `party-mode`, không chỉ xuất hiện ở cuối phiên.
