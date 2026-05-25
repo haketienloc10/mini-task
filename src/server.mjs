@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { TaskStore } from './taskStore.mjs';
 import { findSubagent, listSubagents } from './subagents.mjs';
+import { enrichTask, normalizeNeedsInput } from './taskCockpit.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, '..', 'public');
@@ -26,7 +27,7 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
   const publishTaskEvent = (type, task) => {
     if (!task) return;
     for (const res of taskClients) {
-      sendSseEvent(res, type, task);
+      sendSseEvent(res, type, enrichTask(task));
     }
   };
   const pollTaskChanges = async () => {
@@ -110,7 +111,7 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
       }
 
       if (req.method === 'GET' && url.pathname === '/api/tasks') {
-        return sendJson(res, 200, await store.listTasks());
+        return sendJson(res, 200, enrichTasks(await store.listTasks()));
       }
 
       if (req.method === 'GET' && url.pathname === '/api/tasks/events') {
@@ -120,7 +121,7 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
           connection: 'keep-alive'
         });
         res.write('retry: 1000\n\n');
-        sendSseEvent(res, 'task-snapshot', await store.listTasks());
+        sendSseEvent(res, 'task-snapshot', enrichTasks(await store.listTasks()));
 
         taskClients.add(res);
         startPolling();
@@ -138,7 +139,7 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
         try {
           const task = await store.createTask(body);
           publishTaskEvent('task-created', task);
-          return sendJson(res, 201, task);
+          return sendJson(res, 201, enrichTask(task));
         } catch (error) {
           return sendJson(res, 400, { error: error.message });
         }
@@ -148,7 +149,7 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
       if (req.method === 'GET' && taskMatch) {
         const task = await store.getTask(taskMatch[1]);
         if (!task) return sendJson(res, 404, { error: 'Task not found' });
-        return sendJson(res, 200, task);
+        return sendJson(res, 200, enrichTask(task));
       }
 
       if (req.method === 'DELETE' && taskMatch) {
@@ -156,7 +157,7 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
           const task = await store.deleteTask(taskMatch[1]);
           if (!task) return sendJson(res, 404, { error: 'Task not found' });
           publishTaskEvent('task-deleted', task);
-          return sendJson(res, 200, task);
+          return sendJson(res, 200, enrichTask(task));
         } catch (error) {
           return sendJson(res, 409, { error: error.message });
         }
@@ -197,54 +198,28 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
       if (req.method === 'POST' && runMatch) {
         const task = await store.getTask(runMatch[1]);
         if (!task) return sendJson(res, 404, { error: 'Task not found' });
-        if (task.status === 'Running') return sendJson(res, 409, { error: 'Task is already running' });
-        
+
         let body = {};
         try {
           body = await readJson(req);
         } catch (e) {
           // ignore
         }
-        
-        let taskForRun = task;
-        let runOptions = runnerOptions;
-        if (body.prompt?.trim()) {
-          const userMessage = {
-            id: randomUUID(),
-            sender: 'user',
-            content: body.prompt.trim(),
-            createdAt: new Date().toISOString()
-          };
-          taskForRun = {
-            ...task,
-            messages: [...(task.messages || []), userMessage]
-          };
-          runOptions = { ...runnerOptions, customPrompt: body.prompt.trim() };
-        } else {
-          if (!task.messages || task.messages.length === 0) {
-            const firstUserMsg = {
-              id: randomUUID(),
-              sender: 'user',
-              content: [task.description, task.notes].filter(Boolean).join('\n\n'),
-              createdAt: new Date().toISOString()
-            };
-            taskForRun = {
-              ...task,
-              messages: [firstUserMsg]
-            };
-          } else {
-            const lastUserMsg = [...task.messages].reverse().find(m => m.sender === 'user');
-            runOptions = { ...runnerOptions, customPrompt: lastUserMsg?.content };
-          }
-        }
+
+        const mode = resolveRunMode(body, task);
+        const runValidation = validateRunMode(mode, body, enrichTask(task).actions);
+        if (runValidation) return sendJson(res, runValidation.status, { error: runValidation.error });
+
+        const { taskForRun, runOptions } = prepareTaskRun(task, body, mode, runnerOptions);
         const startedTask = await store.updateTask(task.id, {
+          sessionRef: taskForRun.sessionRef,
           messages: taskForRun.messages,
           status: 'Running',
           startedAt: new Date().toISOString(),
           finishedAt: null,
           processRef: null,
           output: '',
-          log: task.sessionRef ? `Resuming session ${task.sessionRef}\n` : 'Starting new session\n',
+          log: taskForRun.sessionRef ? `Resuming session ${taskForRun.sessionRef}\n` : 'Starting new session\n',
           error: '',
           tokenUsage: null
         });
@@ -259,7 +234,29 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
           workerHeartbeatAt: new Date().toISOString()
         });
         publishTaskEvent('task-updated', startedTask);
-        return sendJson(res, 202, taskWithWorker);
+        return sendJson(res, 202, enrichTask(taskWithWorker));
+      }
+
+      const needsInputMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/needs-input$/);
+      if (req.method === 'PATCH' && needsInputMatch) {
+        const task = await store.getTask(needsInputMatch[1]);
+        if (!task) return sendJson(res, 404, { error: 'Task not found' });
+        const body = await readJson(req);
+        if (task.status === 'Running' && body.active !== false) {
+          return sendJson(res, 409, { error: 'Cannot mark a running task as needing input' });
+        }
+
+        const needsInput = body.active === false
+          ? { active: false, reason: 'manual', message: '', createdAt: null }
+          : normalizeNeedsInput({
+              active: true,
+              reason: body.reason ?? 'manual',
+              message: body.message ?? '',
+              createdAt: new Date().toISOString()
+            });
+        const updatedTask = await store.updateTask(task.id, { needsInput });
+        publishTaskEvent('task-updated', updatedTask);
+        return sendJson(res, 200, enrichTask(updatedTask));
       }
 
       if (req.method === 'GET') {
@@ -319,6 +316,82 @@ function serializableRunnerOptions(options) {
     Object.entries(options)
       .filter(([, value]) => typeof value !== 'function' && value !== undefined)
   );
+}
+
+function enrichTasks(tasks) {
+  return tasks.map(enrichTask);
+}
+
+function resolveRunMode(body, task) {
+  if (body.mode) return body.mode;
+  if (body.prompt?.trim()) return task.sessionRef ? 'followup' : 'start';
+  if (task.status === 'Failed') return 'retry';
+  return task.sessionRef ? 'resume' : 'start';
+}
+
+function validateRunMode(mode, body, actions) {
+  if (!['start', 'resume', 'retry', 'followup'].includes(mode)) {
+    return { status: 400, error: 'Unsupported run mode' };
+  }
+  if (mode === 'start' && !actions.canStart) {
+    return { status: 409, error: 'Task cannot be started in its current state' };
+  }
+  if (mode === 'resume' && !actions.canResume) {
+    return { status: 409, error: 'Task cannot be resumed in its current state' };
+  }
+  if (mode === 'retry' && !actions.canRetry) {
+    return { status: 409, error: 'Task cannot be retried in its current state' };
+  }
+  if (mode === 'followup') {
+    if (!body.prompt?.trim()) return { status: 400, error: 'Follow-up prompt is required' };
+    if (!actions.canFollowUp) {
+      return { status: 409, error: 'Task cannot accept a follow-up in its current state' };
+    }
+  }
+  return null;
+}
+
+function prepareTaskRun(task, body, mode, runnerOptions) {
+  const prompt = body.prompt?.trim();
+  const isRetry = mode === 'retry';
+  const baseTask = isRetry ? { ...task, sessionRef: null } : task;
+  let messages = baseTask.messages || [];
+  let customPrompt = prompt;
+
+  if (prompt) {
+    messages = [
+      ...messages,
+      {
+        id: randomUUID(),
+        sender: 'user',
+        content: prompt,
+        createdAt: new Date().toISOString()
+      }
+    ];
+  } else if (!messages.length) {
+    customPrompt = [baseTask.description, baseTask.notes].filter(Boolean).join('\n\n');
+    messages = [
+      {
+        id: randomUUID(),
+        sender: 'user',
+        content: customPrompt,
+        createdAt: new Date().toISOString()
+      }
+    ];
+  } else {
+    const lastUserMsg = [...messages].reverse().find((message) => message.sender === 'user');
+    customPrompt = lastUserMsg?.content;
+  }
+
+  return {
+    taskForRun: {
+      ...baseTask,
+      messages
+    },
+    runOptions: customPrompt
+      ? { ...runnerOptions, customPrompt }
+      : runnerOptions
+  };
 }
 
 function isLikelyActiveRun(task) {

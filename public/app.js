@@ -8,6 +8,7 @@ const state = {
   selectedTaskId: null,
   activeDetailTab: 'chat',
   terminalViewMode: 'pretty',
+  showNeedsInputOnly: false,
   taskEventSource: null,
   terminalEventSource: null,
   terminalStreamTaskId: null,
@@ -47,6 +48,7 @@ const refs = {
   projectModal: document.querySelector('#projectModal'),
   newProjectBtn: document.querySelector('#newProjectBtn'),
   deleteProjectBtn: document.querySelector('#deleteProjectBtn'),
+  needsInputFilterBtn: document.querySelector('#needsInputFilterBtn'),
   closeProjectModal: document.querySelector('#closeProjectModal'),
   projectForm: document.querySelector('#projectForm'),
   projectFormMessage: document.querySelector('#projectFormMessage'),
@@ -71,6 +73,10 @@ async function init() {
 function bindEvents() {
   refs.refreshButton.addEventListener('click', loadData);
   refs.themeToggle.addEventListener('click', toggleTheme);
+  refs.needsInputFilterBtn.addEventListener('click', () => {
+    state.showNeedsInputOnly = !state.showNeedsInputOnly;
+    renderTaskBoard();
+  });
   refs.backToBoardBtn.addEventListener('click', () => {
     window.location.hash = '';
   });
@@ -135,6 +141,7 @@ function bindEvents() {
     state.terminalViewMode = button.dataset.terminalViewMode;
     renderChat();
   });
+  refs.taskOverview.addEventListener('click', handleTaskActionClick);
 }
 
 async function createProject(event) {
@@ -383,6 +390,10 @@ function renderProjectOverview() {
       <strong>${tasks.filter((task) => task.status === 'Assigned').length}</strong>
     </article>
     <article>
+      <span>Needs input</span>
+      <strong>${tasks.filter((task) => task.needsInput?.active).length}</strong>
+    </article>
+    <article>
       <span>In progress</span>
       <strong>${tasks.filter((task) => task.status === 'Running').length}</strong>
     </article>
@@ -394,7 +405,16 @@ function renderProjectOverview() {
 }
 
 function renderTaskBoard() {
-  const tasks = selectedProjectTasks();
+  refs.needsInputFilterBtn.classList.toggle('active', state.showNeedsInputOnly);
+  refs.needsInputFilterBtn.setAttribute('aria-pressed', String(state.showNeedsInputOnly));
+
+  const tasks = selectedProjectTasks()
+    .filter((task) => !state.showNeedsInputOnly || task.needsInput?.active)
+    .toSorted((a, b) => {
+      const inputDelta = Number(Boolean(b.needsInput?.active)) - Number(Boolean(a.needsInput?.active));
+      if (inputDelta) return inputDelta;
+      return new Date(b.updatedAt) - new Date(a.updatedAt);
+    });
   const tasksByStatus = Object.fromEntries(BOARD_STATUSES.map((status) => [status, []]));
 
   for (const task of tasks) {
@@ -421,12 +441,14 @@ function renderTaskBoard() {
 }
 
 function renderTaskCard(task) {
+  const badges = taskBadges(task);
   return `
     <button class="task-card ${task.id === state.selectedTaskId ? 'active' : ''}" data-task-id="${task.id}" type="button">
       <span class="task-card-top">
         <strong>${escapeHtml(task.title)}</strong>
         <span class="status ${task.status}">${escapeHtml(task.status)}</span>
       </span>
+      ${badges.length ? `<span class="task-badges">${badges.map(renderBadge).join('')}</span>` : ''}
       <span class="task-description">${escapeHtml(task.description)}</span>
       <span class="task-meta-row">
         <span>${escapeHtml(agentLabel(task.subagent))}</span>
@@ -453,6 +475,8 @@ function renderTaskPreview() {
   refs.taskPreview.innerHTML = `
     <section class="task-brief">
       <div class="brief-line"><span>Status</span><strong class="status ${task.status}">${escapeHtml(task.status)}</strong></div>
+      <div class="brief-line"><span>Workflow</span><strong>${escapeHtml(workflowLabel(task.workflowState))}</strong></div>
+      <div class="task-badges">${taskBadges(task).map(renderBadge).join('')}</div>
       <div class="brief-line"><span>Agent</span><strong>${escapeHtml(agentLabel(task.subagent))}</strong></div>
       <div class="brief-line"><span>Updated</span><strong>${escapeHtml(formatDate(task.updatedAt))}</strong></div>
       <p>${escapeHtml(task.description)}</p>
@@ -562,22 +586,25 @@ function renderChat() {
   }
 
   const isRunning = task.status === 'Running';
+  const hasRunnableAction = Boolean(primaryRunMode(task) || task.actions?.canFollowUp);
   refs.chatInput.disabled = isRunning;
-  refs.sendChatBtn.disabled = isRunning;
+  refs.sendChatBtn.disabled = isRunning || !hasRunnableAction;
   refs.chatInput.placeholder = isRunning
     ? 'Agent is running...'
-    : 'Type a follow-up prompt, or leave empty to run the task.';
-  refs.sendChatBtn.textContent = isRunning ? 'Running' : 'Send';
+    : chatPlaceholder(task);
+  refs.sendChatBtn.textContent = isRunning ? 'Running' : primaryRunLabel(task);
 
   const messages = task.messages || [];
   if (!messages.length) {
     refs.chatArea.innerHTML = `
       <section class="task-brief">
         <div class="brief-line"><span>Status</span><strong class="status ${task.status}">${escapeHtml(task.status)}</strong></div>
+        <div class="brief-line"><span>Workflow</span><strong>${escapeHtml(workflowLabel(task.workflowState))}</strong></div>
         <div class="brief-line"><span>Agent</span><strong>${escapeHtml(agentLabel(task.subagent))}</strong></div>
         <div class="brief-line"><span>Workspace</span><code>${escapeHtml(workspaceForTask(task))}</code></div>
         <p>${escapeHtml(task.description)}</p>
         ${task.notes ? `<p class="notes">${escapeHtml(task.notes)}</p>` : ''}
+        <p class="empty compact">No chat messages yet.</p>
       </section>
     `;
     return;
@@ -599,11 +626,26 @@ function renderChat() {
 
 function renderTaskOverview(task) {
   const usage = tokenUsageForTask(task);
+  const evidence = task.evidenceSummary ?? {};
 
   refs.taskOverview.innerHTML = `
+    ${task.needsInput?.active ? `
+      <article class="cockpit-banner">
+        <span>Needs Input</span>
+        <strong>${escapeHtml(task.needsInput.message || 'Waiting for user input')}</strong>
+      </article>
+    ` : ''}
     <article>
-      <span>Status</span>
-      <strong class="status ${task.status}">${escapeHtml(task.status)}</strong>
+      <span>Workflow</span>
+      <strong>${escapeHtml(workflowLabel(task.workflowState))}</strong>
+    </article>
+    <article>
+      <span>Runner</span>
+      <strong>${escapeHtml(runnerLabel(task.runnerState))}</strong>
+    </article>
+    <article>
+      <span>Evidence</span>
+      <strong>${escapeHtml(evidenceLabel(evidence.state))}</strong>
     </article>
     <article>
       <span>Agent</span>
@@ -629,6 +671,10 @@ function renderTaskOverview(task) {
       <span>Output tokens</span>
       <strong>${escapeHtml(formatTokenCount(usage.outputTokens))}</strong>
     </article>
+    <article class="cockpit-actions">
+      <span>Next Action</span>
+      <div>${renderTaskActions(task)}</div>
+    </article>
   `;
 }
 
@@ -639,8 +685,16 @@ function renderDetailTabs() {
 }
 
 function renderOverviewDetail(task) {
+  const evidence = task.evidenceSummary ?? {};
   return `
     <section class="detail-section">
+      <h3>Cockpit</h3>
+      <div class="evidence-grid">
+        <div><span>Workflow</span><strong>${escapeHtml(workflowLabel(task.workflowState))}</strong></div>
+        <div><span>Runner</span><strong>${escapeHtml(runnerLabel(task.runnerState))}</strong></div>
+        <div><span>Evidence</span><strong>${escapeHtml(evidenceLabel(evidence.state))}</strong></div>
+        <div><span>Artifact</span><strong>${escapeHtml(evidence.artifactPath || 'No evidence artifact recorded.')}</strong></div>
+      </div>
       <h3>Description</h3>
       <p>${escapeHtml(task.description)}</p>
       ${task.notes ? `<h3>Notes</h3><p>${escapeHtml(task.notes)}</p>` : ''}
@@ -676,7 +730,7 @@ function renderActivityDetail(task) {
 function renderTerminalDetail(task) {
   const events = task.terminalEvents || [];
   if (!events.length) {
-    return '<section class="terminal-panel empty">No terminal events yet.</section>';
+    return '<section class="terminal-panel empty">No terminal output for this run.</section>';
   }
 
   const runs = new Map();
@@ -963,6 +1017,8 @@ async function sendChatMessage() {
   if (!task || task.status === 'Running') return;
 
   const promptText = refs.chatInput.value.trim();
+  const mode = promptText && task.actions?.canFollowUp ? 'followup' : primaryRunMode(task);
+  if (!mode) return;
   refs.chatInput.disabled = true;
   refs.sendChatBtn.disabled = true;
   refs.sendChatBtn.textContent = 'Running';
@@ -970,12 +1026,65 @@ async function sendChatMessage() {
   try {
     await api(`/api/tasks/${task.id}/run`, {
       method: 'POST',
-      body: JSON.stringify(promptText ? { prompt: promptText } : {})
+      body: JSON.stringify(promptText ? { mode, prompt: promptText } : { mode })
     });
     refs.chatInput.value = '';
     await loadData();
   } catch (error) {
     alert(`Failed to run task: ${error.message}`);
+    await loadData();
+  }
+}
+
+async function handleTaskActionClick(event) {
+  const button = event.target.closest('[data-task-action]');
+  if (!button) return;
+  const task = selectedTask();
+  if (!task) return;
+  const action = button.dataset.taskAction;
+  if (action === 'focus-followup') {
+    state.activeDetailTab = 'chat';
+    renderChat();
+    refs.chatInput.focus();
+    return;
+  }
+  if (action === 'mark-needs-input') {
+    await patchNeedsInput(task, true);
+    return;
+  }
+  if (action === 'clear-needs-input') {
+    await patchNeedsInput(task, false);
+    return;
+  }
+  await runTaskMode(task, action);
+}
+
+async function runTaskMode(task, mode) {
+  try {
+    await api(`/api/tasks/${task.id}/run`, {
+      method: 'POST',
+      body: JSON.stringify({ mode })
+    });
+    await loadData();
+  } catch (error) {
+    alert(`Failed to run task: ${error.message}`);
+    await loadData();
+  }
+}
+
+async function patchNeedsInput(task, active) {
+  const message = active ? prompt('Needs input message', task.needsInput?.message || '') : '';
+  if (active && message === null) return;
+  try {
+    await api(`/api/tasks/${task.id}/needs-input`, {
+      method: 'PATCH',
+      body: JSON.stringify(active
+        ? { active: true, reason: 'manual', message }
+        : { active: false })
+    });
+    await loadData();
+  } catch (error) {
+    alert(`Failed to update Needs Input: ${error.message}`);
     await loadData();
   }
 }
@@ -1082,6 +1191,91 @@ function tokenUsageForTask(task) {
     inputTokens: null,
     outputTokens: null
   };
+}
+
+function taskBadges(task) {
+  const badges = [];
+  if (task.needsInput?.active) badges.push({ label: 'Needs input', kind: 'warning' });
+  if (task.actions?.canRetry) badges.push({ label: 'Retryable', kind: 'danger' });
+  if (task.evidenceSummary?.state === 'evidence_missing') badges.push({ label: 'Missing evidence', kind: 'danger' });
+  if (task.evidenceSummary?.state === 'evidence_present' || task.evidenceSummary?.state === 'verified') {
+    badges.push({ label: task.evidenceSummary.state === 'verified' ? 'Verified' : 'Evidence present', kind: 'success' });
+  }
+  return badges;
+}
+
+function renderBadge(badge) {
+  return `<span class="badge ${badge.kind}">${escapeHtml(badge.label)}</span>`;
+}
+
+function renderTaskActions(task) {
+  const actions = task.actions || {};
+  const buttons = [];
+  if (actions.canStart) buttons.push(actionButton('start', 'Start'));
+  if (actions.canResume) buttons.push(actionButton('resume', 'Resume session'));
+  if (actions.canRetry) buttons.push(actionButton('retry', 'Retry run'));
+  if (actions.canFollowUp) buttons.push(actionButton('focus-followup', 'Send follow-up'));
+  if (actions.canClearNeedsInput) {
+    buttons.push(actionButton('clear-needs-input', 'Clear Needs Input', 'secondary'));
+  } else if (actions.canMarkNeedsInput) {
+    buttons.push(actionButton('mark-needs-input', 'Mark Needs Input', 'secondary'));
+  }
+  return buttons.length ? buttons.join('') : '<strong>No action available</strong>';
+}
+
+function actionButton(action, label, variant = 'primary') {
+  return `<button class="${variant === 'primary' ? 'primary-button' : 'secondary-button'}" data-task-action="${action}" type="button">${escapeHtml(label)}</button>`;
+}
+
+function primaryRunMode(task) {
+  const actions = task.actions || {};
+  if (actions.canStart) return 'start';
+  if (actions.canResume) return 'resume';
+  if (actions.canRetry) return 'retry';
+  return '';
+}
+
+function primaryRunLabel(task) {
+  const mode = primaryRunMode(task);
+  if (mode === 'start') return 'Start';
+  if (mode === 'resume') return 'Resume';
+  if (mode === 'retry') return 'Retry';
+  return 'Send';
+}
+
+function chatPlaceholder(task) {
+  if (task.actions?.canFollowUp) return 'Type a follow-up prompt.';
+  if (task.actions?.canStart) return 'Leave empty to start, or type an initial prompt.';
+  if (task.actions?.canRetry) return 'Leave empty to retry, or type a replacement prompt.';
+  return 'No run action is available.';
+}
+
+function workflowLabel(value) {
+  return {
+    queued: 'Queued',
+    running: 'Running',
+    needs_input: 'Needs Input',
+    failed: 'Failed',
+    done: 'Done'
+  }[value] ?? 'Queued';
+}
+
+function runnerLabel(value) {
+  return {
+    idle: 'Idle',
+    running: 'Running',
+    exited: 'Exited',
+    error: 'Error'
+  }[value] ?? 'Idle';
+}
+
+function evidenceLabel(value) {
+  return {
+    unknown: 'Unknown',
+    evidence_missing: 'Missing evidence',
+    evidence_present: 'Evidence present',
+    verified: 'Verified'
+  }[value] ?? 'Unknown';
 }
 
 function formatTokenCount(value) {

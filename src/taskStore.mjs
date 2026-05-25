@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { normalizeStoredTask } from './taskCockpit.mjs';
 
 const STATUS = new Set(['Created', 'Assigned', 'Running', 'Done', 'Failed', 'Cancelled']);
 
@@ -70,20 +71,26 @@ export class TaskStore {
         }
 
         // Migrate legacy tasks
-        let migrated = false;
         for (const task of tasks) {
           if (!task.projectId) {
             task.projectId = 'default-project';
-            migrated = true;
           }
           if (!task.messages) {
             task.messages = [];
-            migrated = true;
           }
         }
-        if (migrated) {
-          await this.#writeTasks(tasks);
+      }
+
+      let migrated = false;
+      for (let index = 0; index < tasks.length; index += 1) {
+        const normalized = normalizeStoredTask(tasks[index]);
+        if (JSON.stringify(normalized) !== JSON.stringify(tasks[index])) {
+          tasks[index] = normalized;
+          migrated = true;
         }
+      }
+      if (migrated) {
+        await this.#writeTasks(tasks);
       }
 
       for (const project of projects) {
@@ -171,7 +178,14 @@ export class TaskStore {
       error: '',
       tokenUsage: null,
       terminalEvents: [],
-      messages: []
+      messages: [],
+      needsInput: {
+        active: false,
+        reason: 'manual',
+        message: '',
+        createdAt: null
+      },
+      verificationState: 'unknown'
     };
     return this.#mutateTasks((tasks) => {
       tasks.push(task);
@@ -189,11 +203,11 @@ export class TaskStore {
         throw new Error(`Unsupported task status: ${status}`);
       }
 
-      tasks[index] = {
+      tasks[index] = normalizeStoredTask({
         ...tasks[index],
         ...patch,
         updatedAt: new Date().toISOString()
-      };
+      });
       return tasks[index];
     });
   }

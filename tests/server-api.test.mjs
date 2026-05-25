@@ -868,6 +868,229 @@ test('HTTP API resumes the existing codex session for follow-up chat', async () 
   }
 });
 
+test('HTTP API enriches tasks with cockpit state and manages needs input', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codex-task-cockpit-api-'));
+  const dataDir = path.join(root, 'data');
+  const workspace = await mkdtemp(path.join(root, 'workspace-'));
+  const projectId = 'cockpit-project';
+  const now = new Date().toISOString();
+
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(path.join(dataDir, 'projects.json'), `${JSON.stringify([{
+    id: projectId,
+    name: 'Cockpit Project',
+    description: '',
+    workspacePath: workspace
+  }], null, 2)}\n`, 'utf8');
+  await writeFile(path.join(dataDir, 'tasks.json'), `${JSON.stringify([
+    taskFixture({
+      id: 'assigned-never-run',
+      projectId,
+      title: 'Assigned never run',
+      description: 'No run yet',
+      status: 'Assigned',
+      createdAt: now,
+      updatedAt: now
+    }),
+    taskFixture({
+      id: 'running-with-process',
+      projectId,
+      title: 'Running with process',
+      description: 'Active run',
+      status: 'Running',
+      createdAt: now,
+      updatedAt: now,
+      processRef: String(process.pid)
+    }),
+    taskFixture({
+      id: 'needs-input-with-session',
+      projectId,
+      title: 'Needs input with session',
+      description: 'Blocked',
+      status: 'Done',
+      createdAt: now,
+      updatedAt: now,
+      sessionRef: 'session-needs-input',
+      needsInput: {
+        active: true,
+        reason: 'manual',
+        message: 'Need clarification',
+        createdAt: now
+      }
+    }),
+    taskFixture({
+      id: 'done-missing-evidence',
+      projectId,
+      title: 'Done missing evidence',
+      description: 'No artifacts',
+      status: 'Done',
+      createdAt: now,
+      updatedAt: now
+    }),
+    {
+      id: 'legacy-task-missing-new-fields',
+      projectId,
+      title: 'Legacy task',
+      description: 'Missing new fields',
+      subagent: 'default',
+      notes: '',
+      status: 'Assigned',
+      createdAt: now,
+      updatedAt: now,
+      startedAt: null,
+      finishedAt: null,
+      sessionRef: null,
+      processRef: null,
+      runArtifactPath: null,
+      output: '',
+      log: '',
+      error: '',
+      tokenUsage: null,
+      terminalEvents: [],
+      messages: []
+    }
+  ], null, 2)}\n`, 'utf8');
+
+  const store = new TaskStore({ dataDir });
+  const server = createServer({ store });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const tasks = await request(`${baseUrl}/api/tasks`);
+    const assigned = tasks.find((task) => task.id === 'assigned-never-run');
+    assert.equal(assigned.workflowState, 'queued');
+    assert.equal(assigned.runnerState, 'idle');
+    assert.equal(assigned.actions.canStart, true);
+    assert.equal(assigned.evidenceSummary.state, 'unknown');
+
+    const running = tasks.find((task) => task.id === 'running-with-process');
+    assert.equal(running.workflowState, 'running');
+    assert.equal(running.actions.canStart, false);
+    assert.equal(running.actions.canRetry, false);
+
+    const needsInput = await request(`${baseUrl}/api/tasks/needs-input-with-session`);
+    assert.equal(needsInput.workflowState, 'needs_input');
+    assert.equal(needsInput.actions.canResume, true);
+    assert.equal(needsInput.actions.canFollowUp, true);
+    assert.equal(needsInput.actions.canClearNeedsInput, true);
+
+    const missingEvidence = await request(`${baseUrl}/api/tasks/done-missing-evidence`);
+    assert.equal(missingEvidence.evidenceSummary.state, 'evidence_missing');
+
+    const legacy = await request(`${baseUrl}/api/tasks/legacy-task-missing-new-fields`);
+    assert.deepEqual(legacy.needsInput, {
+      active: false,
+      reason: 'manual',
+      message: '',
+      createdAt: null
+    });
+    assert.equal(legacy.verificationState, 'unknown');
+
+    const marked = await request(`${baseUrl}/api/tasks/assigned-never-run/needs-input`, {
+      method: 'PATCH',
+      body: JSON.stringify({ active: true, reason: 'manual', message: 'Need user clarification' })
+    });
+    assert.equal(marked.workflowState, 'needs_input');
+    assert.equal(marked.needsInput.message, 'Need user clarification');
+
+    const cleared = await request(`${baseUrl}/api/tasks/assigned-never-run/needs-input`, {
+      method: 'PATCH',
+      body: JSON.stringify({ active: false })
+    });
+    assert.equal(cleared.workflowState, 'queued');
+    assert.equal(cleared.needsInput.active, false);
+
+    const doubleRun = await fetch(`${baseUrl}/api/tasks/running-with-process/run`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'resume' })
+    });
+    assert.equal(doubleRun.status, 409);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('HTTP API retry mode starts a new run instead of resuming the old session', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codex-task-cockpit-retry-'));
+  const dataDir = path.join(root, 'data');
+  const workspace = await mkdtemp(path.join(root, 'workspace-'));
+  const projectId = 'retry-project';
+  const taskId = 'failed-retryable';
+  const now = new Date().toISOString();
+  const command = path.join(root, 'retry-shim.mjs');
+  const argsLog = path.join(root, 'retry-args.jsonl');
+
+  await writeFile(command, [
+    '#!/usr/bin/env node',
+    'import { appendFileSync } from "node:fs";',
+    `appendFileSync(${JSON.stringify(argsLog)}, JSON.stringify(process.argv.slice(2)) + "\\n");`,
+    'console.log(JSON.stringify({ type: "thread.started", thread_id: "new-retry-session" }));',
+    'console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "retry output" } }));'
+  ].join('\n'), 'utf8');
+  await chmod(command, 0o755);
+
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(path.join(dataDir, 'projects.json'), `${JSON.stringify([{
+    id: projectId,
+    name: 'Retry Project',
+    description: '',
+    workspacePath: workspace
+  }], null, 2)}\n`, 'utf8');
+  await writeFile(path.join(dataDir, 'tasks.json'), `${JSON.stringify([taskFixture({
+    id: taskId,
+    projectId,
+    title: 'Failed retryable',
+    description: 'Retry this task',
+    status: 'Failed',
+    createdAt: now,
+    updatedAt: now,
+    sessionRef: 'old-session',
+    error: 'Previous failure',
+    messages: [{ id: 'user-message', sender: 'user', content: 'Retry this task', createdAt: now }]
+  })], null, 2)}\n`, 'utf8');
+
+  const store = new TaskStore({ dataDir });
+  const server = createServer({
+    store,
+    runnerOptions: {
+      command,
+      timeoutMs: 5000
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const detail = await request(`${baseUrl}/api/tasks/${taskId}`);
+    assert.equal(detail.actions.canRetry, true);
+
+    const startedRun = await request(`${baseUrl}/api/tasks/${taskId}/run`, {
+      method: 'POST',
+      body: JSON.stringify({ mode: 'retry' })
+    });
+    assert.equal(startedRun.status, 'Running');
+    assert.equal(startedRun.sessionRef, null);
+
+    const finished = await waitForTaskStatus(baseUrl, taskId, 'Done');
+    assert.equal(finished.sessionRef, 'new-retry-session');
+    assert.equal(finished.output, 'retry output');
+
+    const invocations = (await readFile(argsLog, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(invocations[0], ['exec', '--sandbox', 'workspace-write', '--json', '-']);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('HTTP API exposes project-scoped codex agents', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'codex-task-subagents-api-'));
   const workspace = await mkdtemp(path.join(root, 'workspace-'));
@@ -907,6 +1130,39 @@ async function request(url, options = {}) {
   const data = await response.json();
   assert.equal(response.ok, true, data.error);
   return data;
+}
+
+function taskFixture(overrides) {
+  return {
+    id: 'task-id',
+    projectId: 'project-id',
+    title: 'Task',
+    description: 'Task description',
+    subagent: 'default',
+    notes: '',
+    status: 'Assigned',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    startedAt: null,
+    finishedAt: null,
+    sessionRef: null,
+    processRef: null,
+    runArtifactPath: null,
+    output: '',
+    log: '',
+    error: '',
+    tokenUsage: null,
+    terminalEvents: [],
+    messages: [],
+    needsInput: {
+      active: false,
+      reason: 'manual',
+      message: '',
+      createdAt: null
+    },
+    verificationState: 'unknown',
+    ...overrides
+  };
 }
 
 async function waitForTaskStatus(baseUrl, taskId, status, timeoutMs = 5000) {
