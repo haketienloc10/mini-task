@@ -72,34 +72,28 @@ Khi skill được kích hoạt, cần xác định các trường sau từ câu
 
 Khi skill này được gọi, phải tuân thủ workflow 3 bước sau.
 
-### Step 1: Identify the Intent Anchor
+### Step 1: Explore Current Context
 
-Phân tích `raw_request` để tìm ra mong muốn cốt lõi nhất của user.
+Trước khi hỏi user hoặc kết luận intent, phải ưu tiên khai thác available context liên quan tới request hiện tại.
 
-`anchor_intent` là phần không được làm lệch.
-
-Mọi question, research, suggestion, expansion, comparison, hoặc preview đều phải làm cho anchor này rõ hơn.
-
-Nếu một suggestion làm user rời khỏi original intent, suggestion đó bị xem là out of scope.
-
-Trong step này, cần xác định:
-
-- user đang muốn đạt điều gì;
-- user đang nói về loại request nào;
-- context nào đã có sẵn;
-- uncertainty lớn nhất là gì;
-- liệu có cần hỏi thêm không.
-
-### Step 2: Check Context Before Asking
-
-Trước khi hỏi user, phải ưu tiên khai thác available context.
+Mục tiêu của step này là hiểu user đang nói trong bối cảnh nào, tránh hỏi lại dữ kiện đã có, và tránh suy đoán intent khi context có thể tự trả lời một phần.
 
 Nguồn nên kiểm tra trước gồm:
 
 - nội dung user vừa cung cấp;
+- conversation hiện tại;
 - tài liệu, ghi chú, artifact, hoặc file liên quan;
 - README, spec, config, script, source code nếu user đang nói về một project;
-- decision đã chốt trong conversation hiện tại.
+- decision đã chốt trước đó;
+- error/log/output nếu user đang nói về bug hoặc troubleshooting.
+
+Trong step này, cần xác định:
+
+- request này đang gắn với context nào;
+- thông tin nào đã có sẵn;
+- thông tin nào có thể tự kiểm tra;
+- thông tin nào không thể tự suy ra từ context;
+- điểm nào cần user chốt vì nó thuộc về intent, preference, trade-off, hoặc boundary.
 
 Không hỏi lại thông tin có thể tìm thấy trong context.
 
@@ -112,9 +106,28 @@ Chỉ hỏi những điều context không thể tự trả lời, ví dụ:
 - risk tolerance;
 - tiêu chí “tốt hơn mong đợi” theo góc nhìn của user.
 
+### Step 2: Identify the Intent Anchor
+
+Sau khi đã kiểm tra context liên quan, phân tích `raw_request` cùng available context để tìm ra mong muốn cốt lõi nhất của user.
+
+`anchor_intent` là phần không được làm lệch.
+
+Mọi question, research, suggestion, expansion, comparison, hoặc preview đều phải làm cho anchor này rõ hơn.
+
+Nếu một suggestion làm user rời khỏi original intent, suggestion đó bị xem là out of scope.
+
+Trong step này, cần xác định:
+
+- user đang muốn đạt điều gì;
+- user đang nói về loại request nào;
+- original intent là gì;
+- uncertainty lớn nhất là gì;
+- decision nào cần user chốt tiếp theo;
+- liệu intent đã `clear_enough` chưa.
+
 Một câu hỏi tốt không hỏi lại dữ kiện đã có.
 
-Một câu hỏi tốt giúp user chốt điều mà tài liệu hoặc source code không thể tự trả lời.
+Một câu hỏi tốt giúp user chốt điều mà tài liệu, source code, hoặc context không thể tự trả lời.
 
 ### Step 3: Forge the Intent
 
