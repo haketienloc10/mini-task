@@ -1,1438 +1,174 @@
 ---
 name: party-mode
-description: Mô phỏng một team nhỏ trong công ty thật, gồm nhiều vai trò chuyên môn khác nhau, mỗi vai trò có quan điểm riêng, trách nhiệm riêng, và được phép bảo vệ quan điểm của mình.
+description: Mô phỏng một team nhỏ trong công ty thật, gồm nhiều vai trò chuyên môn độc lập cùng họp, phản biện và chốt một Execution Handoff artifact đủ rõ để executor ở bước sau có thể implement.
 ---
 
 # SKILL: Party Mode Decision Council (party-mode)
 
-## 1. Skill Identity
+## 1. Skill Identity & Absolute Boundaries
 
 - **Skill name:** `party-mode`
-- **Mục đích:** Mở một phiên thảo luận nhóm có kiểm soát sau khi ý định của user đã được làm rõ, thường là sau `grill-me`.
-- **Bản chất:** Mô phỏng một team nhỏ trong công ty thật, gồm nhiều vai trò chuyên môn khác nhau, mỗi vai trò có quan điểm riêng, trách nhiệm riêng, và được phép bảo vệ quan điểm của mình.
-- **Mục tiêu:** Nâng chất lượng quyết định thông qua phản biện có kiểm soát, không phải tạo đồng thuận giả tạo.
+- **Mục đích:** Dùng một team subagent nhỏ để thảo luận, phản biện và chốt một `Execution Handoff` artifact đủ chi tiết sau khi intent đã được làm rõ (thường là sau `grill-me`).
+- **Bản chất:** Đây là phiên họp của nhiều vai trò chuyên môn độc lập, không phải một cá nhân tự quyết định rồi chuyển qua review.
+- **Output cuối:** Một file/artifact `Execution Handoff.md` hoặc trạng thái `BLOCKED` nếu không đủ dữ kiện để tạo handoff đạt chuẩn.
 
-party-mode được phép đọc context cần thiết từ workspace, repo, tài liệu, artifact, source code, README, spec, hoặc file liên quan để hiểu requirement trước khi thảo luận.
-
-party-mode không được implement, sửa file, chạy command gây thay đổi, tạo commit, hoặc thực hiện execution thay user.
+### 🛑 CRITICAL GUARDRAILS (ZERO TOLERANCE)
+Để đảm bảo an toàn hệ thống và tránh lãng phí token, Agent phải tuân thủ nghiêm ngặt 2 vùng biên giới sau:
+1. **Tuyệt đối KHÔNG thực thi (Non-Execution):** Skill này CHỈ tạo tài liệu handoff. Không implement, không vá file source, không chạy command gây thay đổi hệ thống, không cài package, không commit, không gọi executor hoặc tự ý chuyển phase. Sau khi xuất artifact, agent PHẢI DỪNG LẠI.
+2. **Tuyệt đối KHÔNG giả lập một mình (No Solo Roleplay):** Mỗi vai trò tranh luận phải là một subagent độc lập được spawn từ hệ thống. Điều phối viên (Orchestrator) không được phép tự đóng thế tất cả vai trò trong một response hoặc tự "bịa" ra sự đồng thuận/bất đồng.
 
 ## 2. When to Activate
 
 ### NÊN kích hoạt khi
-
-Dùng skill này khi user muốn một phiên thảo luận nhóm sau khi yêu cầu đã tương đối rõ.
-
-Các tình huống phù hợp:
-
-- User muốn team review một clarified intent.
-- User muốn nhiều vai trò phản biện trước khi chốt.
-- User muốn BA, khách hàng, kỹ thuật, QA cùng đánh giá.
-- User muốn kiểm tra một hướng feature/change request/bug fix trước khi handoff.
-- User muốn review một architecture direction, UX flow, workflow, skill design, prompt design, hoặc implementation plan.
-- User nói các câu như:
-  - "Mở party-mode review giúp anh."
-  - "Cho team nhỏ bàn hướng này."
-  - "Cho các vai phản biện trước khi chốt."
-  - "Sau grill-me, cho party đánh giá."
-  - "Review như một team product thật."
+Dùng skill này khi user muốn một team nhỏ cùng chốt hướng và tạo handoff đủ rõ cho execution ở bước sau.
+- User đã có clarified intent từ `grill-me`.
+- User muốn các vai trò (BA, Tech Lead, QA...) cùng phản biện một feature, change request, bug fix, UX flow, hoặc architecture direction.
+- User nói các câu như: *"Mở party-mode để team chốt execution handoff"*, *"Cho các role họp rồi xuất handoff"*.
 
 ### KHÔNG kích hoạt khi
-
-Không dùng skill này khi:
-
-- Yêu cầu của user còn mơ hồ và cần khám phá intent trước.
-- User chỉ hỏi một câu factual đơn giản.
-- User đang yêu cầu implement trực tiếp.
-- User muốn sửa code, sửa file, chạy command, hoặc execution.
-- User chỉ đang nói chuyện thông thường.
-- Không có đủ context để team thảo luận có ý nghĩa.
-
-Nếu yêu cầu còn chưa rõ, quay lại `grill-me` trước.
+- Yêu cầu của user còn mơ hồ (Cần quay lại `grill-me` để làm rõ trước).
+- User chỉ hỏi một câu factual đơn giản hoặc yêu cầu implement trực tiếp vào source code ngay lập tức.
 
 ## 3. Relationship With grill-me
 
-`grill-me` và `party-mode` là hai skill khác nhau.
+unclear request → grill-me (clarifies intent) → user confirms
+→ party-mode runs (subagent discussion & creates Execution Handoff)
+→ party-mode returns summary → STOP.
 
-- `grill-me` dùng để làm rõ intent.
-- `party-mode` dùng để phản biện và đánh giá intent đã rõ.
-- `party-mode` không được restart quá trình khám phá yêu cầu từ đầu, trừ khi phát hiện ambiguity thật sự blocking.
-- `party-mode` không được implement kết quả.
-- `party-mode` có thể tạo decision summary hoặc handoff notes, nhưng không tạo production changes.
-
-Expected flow:
-
-    Unclear request
-    → grill-me clarifies intent
-    → user confirms clarified outcome
-    → party-mode reviews with multiple roles
-    → party-mode produces decision-ready notes
-    → user decides next step
+- `grill-me` làm rõ ý định; `party-mode` chốt cách làm và tạo bàn giao.
+- `party-mode` không restart lại quá trình khám phá yêu cầu từ đầu trừ khi phát hiện ambiguity thực sự blocking.
 
 ## 4. Subagent Execution Requirement
 
-`party-mode` phải chạy bằng subagent độc lập cho từng role tranh luận.
-
-Mỗi role tranh luận phải được spawn như một subagent riêng. Mỗi subagent nhận cùng một context summary ngắn gọn, cùng một decision target, và chỉ phản hồi từ trách nhiệm chuyên môn của role đó.
-
-Orchestrator không được tự viết thay ý kiến của role.
-
-### Required behavior
-
-Orchestrator chỉ được:
-
-- Chọn role phù hợp.
-- Tạo discussion context summary ngắn gọn.
-- Spawn từng role subagent.
-- Thu thập phản hồi của từng role.
-- Hiển thị phản hồi theo từng role.
-- Điều phối Challenge Round bằng cách gọi lại role liên quan khi cần.
-- Để Secretary ghi live notes và final minutes.
-
-### Forbidden behavior
-
-Orchestrator không được:
-
-- Roleplay tất cả role trong một response.
-- Tự giả lập ý kiến của BA, Customer Advocate, Product Owner, Technical Lead, QA, UX, hoặc Risk/Ops.
-- Tự tạo disagreement nếu role subagent không nêu ra.
-- Blend nhiều role thành một giọng chung.
-- Paraphrase làm mềm hoặc đổi nghĩa ý kiến của role.
+Mỗi role tranh luận phải được spawn như một subagent riêng nhận cùng một context summary ngắn gọn. Nếu runtime của `gemini-cli` không hỗ trợ hoặc không thể gọi subagent đúng cách, `party-mode` phải dừng lại ngay lập tức và báo lỗi:
+> `BLOCKED: party-mode yêu cầu subagent độc lập cho từng role. Runtime hiện tại không hỗ trợ.`
 
 ## 5. Team Roster
 
-Giữ team gọn. Không tạo quá nhiều role.
-
 ### Default roles
+- **Secretary / Meeting Scribe:** Ghi tiến trình, quyết định, bất đồng và tạo Handoff artifact. Không tranh luận, không quyết định thay team. Bảo vệ tính trung thực của biên bản.
+- **Business Analyst (BA):** Chuyển intent thành requirement, business rules, scope boundaries. Bảo vệ sự rõ ràng, không nhập nhằng.
+- **Customer Advocate:** Đại diện end-user. Bảo vệ giá trị sử dụng thật và kì vọng của khách hàng.
+- **Product Owner (PO):** Ưu tiên Must-have, Should-have, ngăn chặn scope creep. Bảo vệ kỷ luật MVP.
+- **Technical Lead:** Review tính khả thi, kiến trúc, rủi ro tích hợp, technical trade-off. Bảo vệ tính thực tế kỹ thuật.
+- **QA (Quality Analyst):** Xác định acceptance criteria, edge cases, rủi ro hồi quy (regression). Bảo vệ khả năng kiểm chứng.
 
-| Role | Nhiệm vụ | Góc nhìn cần bảo vệ |
-|---|---|---|
-| **Secretary / Meeting Scribe** | Ghi biên bản xuyên suốt phiên thảo luận: session opening, ý kiến từng role, disagreement, convergence, decision, open questions, risks, handoff notes. Không tranh luận, không quyết định, không tự resolve Challenge. | Tính trung thực, đầy đủ, rõ ràng của biên bản và không làm méo ý kiến các role khác. |
-| **Business Analyst / BA** | Chuyển clarified intent thành requirement, business rules, scope boundaries, acceptance conditions. Phát hiện chỗ còn mơ hồ. | Sự rõ ràng, đầy đủ, không nhập nhằng của yêu cầu. |
-| **Customer Advocate** | Đại diện cho user, khách hàng, hoặc end-user. Kiểm tra phương án có giải quyết đúng pain point và đúng kỳ vọng không. | Giá trị sử dụng thật và expectation alignment. |
-| **Product Owner / Scope Owner** | Ưu tiên must-have, should-have, later, out-of-scope. Chặn scope creep. | MVP value, business value, và priority discipline. |
-| **Technical Lead** | Review feasibility, architecture, dependency, integration risk, maintainability, technical trade-off. | Tính khả thi kỹ thuật và implementation realism. |
-| **QA / Quality Analyst** | Xác định acceptance criteria, test cases, edge cases, regression risks, và proof cần có để nghiệm thu. | Khả năng kiểm chứng và chất lượng đầu ra. |
-
-### Conditional roles
-
-Chỉ dùng role điều kiện khi task thật sự cần.
-
-| Role | Khi nào dùng | Nhiệm vụ | Góc nhìn cần bảo vệ |
-|---|---|---|---|
-| **UX / Workflow Designer** | Khi task liên quan UI, CLI/TUI, user journey, agent workflow, preview outcome, interaction flow. | Review flow clarity, cognitive load, layout, feedback states, điểm user dễ hiểu nhầm. | Usability và workflow clarity. |
-| **Risk / Ops Reviewer** | Khi task liên quan production, data, permission, auth, server, migration, destructive action, deployment, vận hành dài hạn. | Review security, rollback, logging, monitoring, deploy risk, data safety, operational burden. | Safety và operability. |
+### Conditional roles (Chỉ dùng khi task thực sự cần)
+- **UX / Workflow Designer:** Dùng khi task liên quan UI/UX, user journey, interaction flow.
+- **Risk / Ops Reviewer:** Dùng khi liên quan tới production data, permission, auth, migration nguy hiểm.
 
 ## 6. Role Selection Rules
-
-Không luôn dùng tất cả role.
-
-Default selection:
-
-- Normal feature/change request:
-  - BA
-  - Customer Advocate
-  - Product Owner
-  - Technical Lead
-  - QA
-  - Secretary
-
-- Bug fix:
-  - Customer Advocate
-  - Technical Lead
-  - QA
-  - Secretary
-
-- UI/UX/workflow:
-  - Customer Advocate
-  - Product Owner
-  - UX / Workflow Designer
-  - Technical Lead
-  - QA
-  - Secretary
-
-- Architecture/refactor:
-  - Product Owner
-  - Technical Lead
-  - QA
-  - Risk / Ops Reviewer nếu có production risk
-  - Secretary
-
-- Production/server/data/auth/migration:
-  - Product Owner
-  - Technical Lead
-  - QA
-  - Risk / Ops Reviewer
-  - Secretary
-
-- Skill/prompt/harness workflow:
-  - BA
-  - Customer Advocate
-  - Product Owner
-  - Technical Lead
-  - QA
-  - UX / Workflow Designer
-  - Secretary
-
-Giới hạn số role tranh luận trong khoảng 3 đến 6. Secretary không tính là role tranh luận.
-
-Nếu quá nhiều role có vẻ liên quan, chọn team nhỏ nhất đủ để bao phủ quyết định.
+Giới hạn số role tranh luận từ **3 đến 6** (Secretary không tính vào số lượng này).
+- *Normal Feature:* BA, Customer Advocate, PO, Tech Lead, QA, Secretary.
+- *Bug Fix:* Customer Advocate, Tech Lead, QA, Secretary.
+- *Architecture/Refactor:* PO, Tech Lead, QA, Risk/Ops (nếu có rủi ro hệ thống), Secretary.
 
 ## 7. Core Principles
+- **Independent perspectives:** Mỗi role phát biểu từ chuyên môn riêng, không đồng ý chung chung. Đồng ý phải có lý do/điều kiện đi kèm.
+- **Controlled disagreement:** Khuyến khích phản biện thẳng thắn nhưng có kiểm soát.
+- **Context Discovery:** Ưu tiên đọc thụ động các file sẵn có (README, spec, source code liên quan) trước khi bắt user phải copy-paste lại nội dung.
 
-### Independent perspectives
+## 8. Discussion Context Compression
+Trước khi spawn các subagent, Orchestrator phải nén context thành một bản tóm tắt **dưới 400 từ** gồm: User intent, Desired outcome, Confirmed constraints, và Target area. Không đưa toàn bộ lịch sử chat dài dòng vào subagent.
 
-Mỗi role phải nói từ trách nhiệm chuyên môn riêng của mình.
+## 9. Session Flow & Circuit Breaker
 
-Role không được chỉ đồng ý chung chung. Nếu đồng ý, role vẫn phải đưa ra lý do riêng, concern riêng, condition riêng, hoặc trade-off riêng.
-
-### Controlled disagreement
-
-Bất đồng là điều được mong đợi.
-
-Một role có thể nói:
-
-- "Yêu cầu này chưa đủ rõ."
-- "Việc này có giá trị nhưng chưa nên nằm trong MVP."
-- "Về kỹ thuật có thể làm, nhưng chi phí quá cao."
-- "Dễ build nhưng khó verify."
-- "Đúng spec nhưng chưa chắc đúng kỳ vọng user."
-- "Có rủi ro vận hành hoặc bảo mật."
-
-### No premature synthesis
-
-Không tổng hợp quá sớm.
-
-Trước tiên phải lấy position riêng của từng role. Sau đó mới chạy Challenge Round. Chỉ sau khi có phản biện mới để Secretary tổng hợp.
-
-### No execution
-
-Party mode không được:
-
-- Implement.
-- Patch files.
-- Modify code.
-- Tự chuyển sang lifecycle phase tiếp theo.
-- Nói với user rằng implementation sẽ bắt đầu.
-
-Party mode chỉ được tạo decision notes hoặc handoff-ready notes.
-
-### User remains the decision maker
-
-Team có thể recommend, nhưng user là người quyết định cuối cùng.
-
-Không được nói decision là final nếu user chưa xác nhận rõ.
-
-### Discussion before decision
-
-Party-mode phải thể hiện cuộc thảo luận trước, rồi mới đưa biên bản hoặc chốt quyết định.
-
-Trong default mode, không được bắt đầu bằng bảng `Role Positions` hoặc `Party Mode Result`.
-
-Thứ tự đúng là:
-
-1. Secretary mở phiên.
-2. Các role phát biểu quan điểm ban đầu.
-3. Secretary ghi live notes.
-4. Các role phản biện trực tiếp nhau.
-5. Secretary ghi lại bất đồng và điểm đang hội tụ.
-6. Team đi tới narrowed direction.
-7. Secretary tạo biên bản cuối phiên.
-
-Bảng chỉ được dùng ở phần cuối để tóm tắt nếu cần. Không dùng bảng làm hình thức chính của cuộc thảo luận.
-
-### Subagents, not simulated personas
-
-`party-mode` không phải là một response tự roleplay nhiều vai.
-
-Mỗi role tranh luận phải là một subagent độc lập. Đây là điều kiện bắt buộc để giữ quan điểm riêng, giảm đồng thuận giả, và tránh orchestrator tự bịa ý kiến cho cả team.
-
-Nếu không spawn được subagent, phiên `party-mode` không hợp lệ.
-
-Party-mode chỉ hợp lệ khi chạy bằng subagent.
-
-## 8. Session Input
-
-Khi kích hoạt, xác định clarified context hiện có.
-
-Ưu tiên dùng các nguồn sau nếu có:
-
-- Confirmed grill-me result.
-- Preview outcome.
-- Clarified intent.
-- User constraints.
-- Known project context.
-- Existing requirement notes.
-- Existing implementation contract hoặc planning artifact.
-- Latest user message.
-
-Nếu thiếu clarified context hoặc context còn quá mơ hồ, không ép chạy party-mode. Hỏi phần còn thiếu hoặc đề xuất quay lại `grill-me`.
-
-## 9. Context Discovery Before Discussion
-
-Trước khi bắt đầu phiên thảo luận, `party-mode` phải kiểm tra context có sẵn nếu user đã nhắc tới file, repo, artifact, workspace, feature, bug, hoặc project cụ thể.
-
-Mục tiêu của bước này là hiểu đúng requirement trước khi các role phản biện. Không được ép user paste lại thông tin nếu thông tin đó có thể đọc được từ workspace hoặc tài liệu sẵn có.
-
-### Được phép làm
-
-`party-mode` được phép đọc thụ động các nguồn context liên quan:
-
-- File requirement hoặc intent snapshot mà user nhắc tới.
-- README, spec, docs, planning artifact.
-- Source code liên quan trực tiếp tới requirement.
-- Project structure ở mức cần thiết.
-- Existing issue, task note, handoff note, hoặc previous artifact nếu có.
-- Config hoặc script liên quan nếu cần hiểu workflow.
-
-### Không được làm
-
-`party-mode` không được:
-
-- Sửa file.
-- Patch code.
-- Tạo file mới.
-- Xóa file.
-- Commit code.
-- Chạy command có side effect.
-- Cài package.
-- Start server.
-- Run migration.
-- Thực hiện implementation thay user.
-
-### Khi thiếu context
-
-Nếu context không tìm thấy trong workspace, `party-mode` mới hỏi user cung cấp thêm.
-
-Không được yêu cầu user paste file ngay từ đầu nếu file có thể được đọc từ workspace.
-
-## 10. Discussion Context Compression
-
-Trước khi cho các role phản hồi, tạo context summary ngắn gọn gồm:
-
-- User intent.
-- Desired outcome.
-- Confirmed constraints.
-- Known non-goals.
-- Decision needed.
-- Relevant project context.
-
-Mục tiêu: dưới 400 words.
-
-Không đưa toàn bộ conversation history vào phiên role discussion nếu không cần thiết.
-
-## 11. Session Flow
-
-### Step 1: Secretary opens the meeting
-
-Secretary mở phiên như một cuộc họp thật.
-
-Secretary phải nêu:
-
-- Clarified intent.
-- Known constraints.
-- Decision needed.
-- Selected roles.
-- Assumptions nếu có.
-
-Format:
-
-    ## Party Mode Discussion
-
-    ### 1. Mở phiên
-
-    **Secretary**:
-        Hôm nay team sẽ thảo luận về...
-        Context đã rõ là...
-        Quyết định cần đạt được là...
-        Các role tham gia gồm...
+### Step 1: Secretary mở phiên họp
+Nêu rõ clarified intent, mục tiêu cần chốt, và danh sách các role tham gia.
 
 ### Step 2: Initial Position Round
+Mỗi debating subagent phát biểu ngắn gọn về: Quan điểm chính, lý do, và điều kiện để role đó chấp thuận (approval conditions).
 
-Mỗi debating role phát biểu quan điểm ban đầu bằng giọng của chính role đó.
+### Step 3: Secretary ghi nhận sơ bộ
+Ghi nhanh các điểm đồng thuận và các điểm đang có xung đột (conflict).
 
-Không dùng bảng ở vòng này, trừ khi user yêu cầu compact output.
+### Step 4: Challenge Round (Vòng phản biện & Cắt đuôi)
+Các role đối thoại trực tiếp theo lượt thoại (turn-based). 
+- ⚡ **Cơ chế Cắt đuôi (Circuit Breaker):** Mỗi xung đột/issue chỉ được tranh luận **tối đa 2 lượt thoại** giữa các bên liên quan. 
+- Nếu sau 2 lượt vẫn không tìm được tiếng nói chung, **Secretary bắt buộc phải can thiệp**, cắt đuôi tranh luận, đánh dấu điểm đó là `BLOCKED` và đưa thẳng vào chat summary cuối để user chốt. Không tạo handoff ready nếu blocker đó ảnh hưởng implementation.
 
-Mỗi role nên nêu:
+### Step 5: Secretary tổng hợp sau phản biện
+Ghi lại những gì đã chốt, những trade-off và những điểm nghẽn cần User quyết định.
 
-- Quan điểm chính.
-- Lý do.
-- Điều role đang bảo vệ.
-- Điểm chưa yên tâm.
-- Điều kiện để role đồng ý.
+### Step 6: Team Decision Round
+PO đưa ra hướng chốt tinh gọn cuối cùng (MVP). Các role khác xác nhận nhanh góc nhìn của mình dựa trên hướng chốt đó. Nếu còn điểm nghẽn không thể tự quyết, chuyển trạng thái phiên thành `BLOCKED`.
 
+### Step 7: Xuất dữ liệu & Kiểm Tra Readiness Gate
+Secretary tạo `Execution Handoff` artifact. Team thực hiện checklist nhanh để đảm bảo handoff không bị mơ hồ về mặt kỹ thuật.
+Readiness Gate chỉ PASS nếu handoff có đủ:
+
+- final decision rõ, không còn option ngang hàng;
+- target files/modules/areas cụ thể;
+- in-scope/out-of-scope rõ;
+- state/data contract đủ exact nếu có state;
+- action/API guard đủ exact nếu có workflow/action;
+- UI/backend contract đủ rõ nếu có UI/backend;
+- acceptance criteria đo được;
+- validation/evidence executor phải trả về;
+- không còn blocker kỹ thuật khiến executor phải tự quyết.
+
+### Step 8: Dừng hệ thống (Stop)
+Trả chat summary ngắn cho user, tạo/lưu `Execution Handoff` artifact nếu READY, rồi kết thúc phiên.
+
+## 10. Execution Handoff Artifact Template
+*(Tài liệu này được xuất ra file `.md` riêng biệt, không dump toàn bộ vào màn hình chat)*
 Format:
-
-    ### 2. Vòng 1 - Quan điểm ban đầu
-
-    **BA**:
-        Tôi nhìn yêu cầu này như sau...
-        Điểm tôi cần bảo vệ là...
-        Tôi chưa yên tâm ở...
-        Tôi sẽ đồng ý nếu...
-
-    **Customer Advocate**:
-        Với góc nhìn user, tôi quan tâm nhất là...
-        Tôi lo rằng...
-        Tôi muốn outcome phải...
-
-    **Product Owner**:
-        Tôi đồng ý phần...
-        Nhưng với MVP, tôi chỉ chấp nhận...
-        Phần này nên để sau...
-
-    **Technical Lead**:
-        Về kỹ thuật, hướng này khả thi nếu...
-        Rủi ro kỹ thuật chính là...
-        Tôi không muốn chúng ta...
-
-    **QA**:
-        Tôi chỉ có thể nghiệm thu nếu...
-        Edge case cần chú ý là...
-        Evidence tối thiểu phải có...
-
-### Step 3: Secretary live notes after initial positions
-
-Secretary ghi biên bản ngắn sau vòng quan điểm ban đầu.
-
-Secretary ghi:
-
-- Điểm các role đang đồng thuận.
-- Điểm đang bất đồng.
-- Điều kiện approval đáng chú ý.
-- Câu hỏi còn mở.
-
-Format:
-
-    ### 3. Ghi chú thư ký sau vòng 1
-
-    **Secretary**:
-        - Đã có đồng thuận sơ bộ về...
-        - Bất đồng chính hiện tại là...
-        - Điều kiện approval quan trọng gồm...
-        - Câu hỏi còn mở là...
-
-### Step 4: Challenge Round
-
-Các role phản biện trực tiếp claim, assumption, hoặc recommendation của role khác.
-
-Không viết dạng summary như:
-
-    BA vs Product Owner: BA muốn A, PO muốn B.
-
-Phải viết dạng lượt thoại:
-
-    ### 4. Vòng 2 - Phản biện
-
-    **Product Owner → BA**:
-    Tôi hiểu cần state model rõ, nhưng nếu định nghĩa quá rộng ngay bây giờ thì MVP sẽ bị trễ. Tôi đề nghị chỉ chốt các state bắt buộc trước.
-
-    **BA → Product Owner**:
-    Tôi đồng ý không làm full taxonomy, nhưng nếu không tách tối thiểu các loại trạng thái thì implementation sẽ tiếp tục nhập nhằng.
-
-    **QA → Technical Lead**:
-    Nếu dùng derived state, tôi cần rule rõ để test. Nếu không, test chỉ kiểm tra UI render chứ không kiểm tra behavior.
-
-Không tạo Challenge giả. Nếu team thật sự đồng thuận, Challenge Round phải nói rõ team aligned ở đâu và vẫn nêu điều kiện để giữ alignment đó.
-
-### Step 5: Secretary live notes after challenge round
-
-Secretary ghi lại kết quả phản biện.
-
-Secretary phải nêu:
-
-- Bất đồng nào đã được giải quyết.
-- Bất đồng nào vẫn còn.
-- Trade-off chính.
-- Claim nào cần evidence hoặc quyết định của user.
-
-Format:
-
-    ### 5. Ghi chú thư ký sau phản biện
-
-    **Secretary**:
-        - Bất đồng đã thu hẹp: ...
-        - Vẫn còn chưa thống nhất: ...
-        - Trade-off chính: ...
-        - Cần user quyết định: ...
-
-### Step 6: Convergence Round
-
-Team đi tới hướng hội tụ.
-
-Product Owner đề xuất narrowed direction.
-
-Sau đó:
-
-- BA xác nhận requirement clarity.
-- Customer Advocate xác nhận user value.
-- Technical Lead xác nhận feasibility.
-- QA xác nhận testability.
-- Conditional roles xác nhận concern của mình nếu có.
-
-Format:
-
-    ### 6. Vòng 3 - Hội tụ
-
-    **Product Owner**:
-        Tôi đề xuất chốt hướng hẹp như sau...
-
-    **BA**:
-        Tôi chấp nhận hướng này nếu requirement ghi rõ...
-
-    **Customer Advocate**:
-        Tôi đồng ý vì user sẽ thấy được...
-
-    **Technical Lead**:
-        Tôi xác nhận hướng này feasible nếu...
-
-    **QA**:
-        Tôi có thể nghiệm thu nếu có các acceptance conditions sau...
-
-### Step 7: Secretary final minutes
-
-Secretary tạo biên bản cuối phiên.
-
-Format:
-
-    ### 7. Biên bản cuối phiên
-
-    #### Recommended Direction
-    ...
-
-    #### Agreed Scope
-    ...
-
-    #### Out of Scope
-    ...
-
-    #### Key Decisions
-    ...
-
-    #### Acceptance Conditions
-    ...
-
-    #### Risks / Watch Points
-    ...
-
-    #### Open Questions
-    ...
-
-    #### Handoff Notes
-    ...
-
-Sau khi Secretary tạo biên bản cuối phiên, phải hỏi user chọn bước tiếp theo.
-
-Không tự động tạo file hoặc execution handoff nếu user chưa chọn.
-
-Format:
-
-    ### 8. Lựa chọn tiếp theo
-
-    Secretary:
-    Biên bản cuộc họp đã hoàn tất. Anh muốn em xuất kết quả theo hướng nào?
-
-    1. Xuất biên bản cuộc họp thành file `.md`
-       - Phù hợp khi anh muốn lưu lại discussion, decision, disagreement, scope, risks, open questions.
-
-    2. Xuất `Execution Handoff`
-       - Phù hợp khi anh đã chốt hướng và muốn tạo contract đủ rõ để executor implement ngay.
-
-    3. Xuất cả 2 file
-       - Tạo cả biên bản cuộc họp và `Execution Handoff`.
-
-    Nếu còn open question blocking implementation, option 2 và 3 phải báo `BLOCKED` cho phần handoff thay vì tạo handoff giả.
-
-## 12. Secretary Notes Throughout the Session
-
-Secretary hoạt động trong toàn bộ phiên `party-mode`, không chỉ xuất hiện ở cuối phiên.
-
-Secretary phải ghi lại:
-
-- Phần mở phiên.
-- Ý chính của từng role.
-- Các bất đồng rõ ràng.
-- Điều kiện để từng role chấp thuận.
-- Những điểm còn chưa thống nhất.
-- Ghi chú quyết định cuối phiên.
-
-Secretary không được:
-
-- Tranh luận.
-- Quyết định.
-- Gộp các ý kiến đang mâu thuẫn thành đồng thuận giả.
-- Viết lại ý kiến của role khác theo hướng nhẹ hơn hoặc khác nghĩa so với ý gốc.
-
-## 13. Output Modes
-
-Chọn output mode phù hợp với tình huống.
-
-### Mode A: Meeting Discussion Mode
-
-Đây là default mode của `party-mode`.
-
-Dùng khi user muốn thấy một cuộc thảo luận nhóm thật, có role phát biểu, phản biện, hội tụ, rồi mới có biên bản cuối.
-
-Output phải thể hiện các role đang trao đổi với nhau theo lượt, không chỉ là bảng tổng hợp.
-
-Cấu trúc bắt buộc:
-
-1. Secretary opens the meeting.
-2. Initial Position Round.
-3. Secretary live notes.
-4. Challenge Round.
-5. Secretary live notes.
-6. Convergence Round.
-7. Secretary final minutes.
-
-Không được bắt đầu bằng `Party Mode Result` trong mode này.
-
-Không dùng bảng `Role Positions` làm output chính. Nếu cần bảng, chỉ dùng ở phần biên bản cuối để tóm tắt.
-
-### Mode B: Compact Decision Mode
-
-Dùng khi user muốn câu trả lời gọn.
-
-Output chỉ gồm:
-
-1. Role position table.
-2. Key disagreements.
-3. Recommended direction.
-4. Handoff notes.
-
-### Mode C: Implementation-Ready Handoff Mode
-
-Dùng khi user muốn kết quả sau party meeting đủ rõ để executor có thể implement ngay mà không cần quay lại review plan, thảo luận lại scope, hoặc tự suy luận requirement.
-
-Mode này không được chỉ tạo decision notes. Output phải là một implementation-ready contract.
-
-Party-mode vẫn không được implement, không sửa file, không chạy command gây thay đổi. Nhưng handoff phải đủ cụ thể để executor biết:
-
-- làm gì;
-- không làm gì;
-- sửa ở đâu;
-- behavior mong muốn là gì;
-- dữ liệu/state/action nào cần có;
-- acceptance criteria là gì;
-- test/validation nào cần chạy;
-- rủi ro nào phải tránh;
-- thứ tự implement đề xuất là gì.
-
-Nếu còn open question blocking implementation, không được tạo handoff giả. Phải báo `BLOCKED` và liệt kê câu hỏi blocking.
-
-Output bắt buộc:
-
-    # Implementation-Ready Handoff
+```
+    # Execution Handoff
 
     ## 1. Objective
-    ...
+    [Mục tiêu implementation ngắn gọn từ 1-3 câu]
 
     ## 2. Final Decision
-    ...
-
-    ## 3. Implementation Scope
-    ...
-
-    ## 4. Explicit Non-Goals
-    ...
-
-    ## 5. Current Context / Existing System Assumptions
-    ...
-
-    ## 6. Target Files / Areas To Inspect Or Modify
-    ...
-
-    ## 7. Required Behavior
-    ...
-
-    ## 8. Data / State / Model Contract
-    ...
-
-    ## 9. Action / Permission / Guard Rules
-    ...
-
-    ## 10. UI / UX Contract
-    ...
-
-    ## 11. API / Backend Contract
-    ...
-
-    ## 12. Execution Plan For Executor
-    ...
-
-    ## 13. Acceptance Criteria
-    ...
-
-    ## 14. Required Tests / Validation
-    ...
-
-    ## 15. Regression Risks
-    ...
-
-    ## 16. Evidence Executor Must Provide
-    ...
-
-    ## 17. Do Not Do
-    ...
-
-### Implementation-Ready Handoff Quality Gate
-
-Trước khi xuất `Implementation-Ready Handoff`, Secretary phải kiểm tra handoff có đủ các điều kiện sau không.
-
-Handoff chỉ đạt nếu executor có thể bắt đầu implement mà không cần hỏi lại về plan.
-
-Checklist bắt buộc:
-
-- Có objective rõ ràng trong 1-3 câu.
-- Có final decision, không còn nhiều phương án ngang nhau.
-- Có in-scope và out-of-scope rõ.
-- Có target files, modules, components, APIs, hoặc project areas cần inspect/modify.
-- Có behavior contract đủ cụ thể.
-- Có state/model/data contract nếu task liên quan dữ liệu hoặc trạng thái.
-- Có action guard rules nếu task có button/action/workflow.
-- Có UI/UX contract nếu task liên quan giao diện hoặc flow.
-- Có backend/API contract nếu task liên quan server, persistence, API, worker, session, hoặc event stream.
-- Có execution plan theo thứ tự implement.
-- Có acceptance criteria kiểm chứng được.
-- Có required tests hoặc validation commands.
-- Có regression risks.
-- Có evidence executor phải trả về sau khi làm.
-- Không có open question blocking implementation.
-
-Nếu thiếu một trong các mục trên, Secretary phải ghi:
-
-    BLOCKED: Handoff chưa đủ implementation-ready.
-
-Sau đó liệt kê chính xác phần thiếu.
-
-Không được kết thúc bằng câu kiểu:
-
-    Bước tiếp theo là viết implementation contract.
-
-Vì Mode C chính là implementation contract.
-
-### Content-Level Readiness Review
-
-`Implementation-Ready Handoff` không chỉ được kiểm tra theo sự có mặt của các heading. Nội dung trong từng heading phải đủ quyết định để executor không phải tự suy luận.
-
-Trước khi xuất handoff cuối cùng, Secretary phải yêu cầu tối thiểu các role sau review handoff draft:
-
-- **BA** kiểm tra requirement, state/rule, scope boundary, terminology.
-- **Technical Lead** kiểm tra feasibility, target modules/files, API/backend/data contract, compatibility.
-- **QA** kiểm tra acceptance criteria, testability, edge cases, validation evidence.
-- **Product Owner** kiểm tra scope và non-goals nếu handoff có nguy cơ phình scope.
-
-Nếu bất kỳ role nào đánh dấu blocker, Secretary không được xuất handoff như ready.
-
-Secretary phải làm một trong hai việc:
-
-1. Bổ sung/sửa handoff để resolve blocker bằng quyết định cụ thể đã có đủ căn cứ.
-2. Nếu blocker cần user quyết định hoặc cần discovery ngoài scope, xuất `BLOCKED` và liệt kê chính xác blocker.
-
-Không được ghi kiểu:
-
-    Tài liệu đủ để bắt đầu discovery/thiết kế.
-
-Vì Mode C phải đủ để implement, không phải đủ để bắt đầu planning.
-
-### Content Requirements For State / Action / API Work
-
-Nếu handoff liên quan state, action, workflow, API, persistence, hoặc UI control, các mục sau phải cụ thể.
-
-#### State / Model Contract phải có
-
-- Exact enum/value names.
-- Casing chính xác.
-- Source of truth.
-- Legacy mapping nếu có field cũ.
-- Transition rules.
-- Derived fields và nơi derive canonical.
-- Persistence rule.
-- Backward compatibility rule.
-- Conflict/precedence rule khi nhiều tín hiệu mâu thuẫn.
-
-Không được chỉ viết “preserve compatibility” nếu chưa nói field nào là source of truth và API trả về gì.
-
-#### Waiting / Blocked / Needs Input rule phải có
-
-Nếu handoff có state kiểu `waiting_input`, `blocked`, `needs_input`, hoặc tương đương, phải nói rõ nguồn phát sinh:
-
-- event nào;
-- exit code nào;
-- stdout/stderr pattern nào;
-- manual action nào;
-- timeout nào;
-- hoặc explicitly nói v1 chỉ hỗ trợ manual mark.
-
-Không được để executor tự đoán từ tên state.
-
-#### Action / Guard Rules phải có
-
-Mỗi action phải có:
-
-- endpoint/function/module xử lý;
-- payload nếu có;
-- enabled condition;
-- disabled condition;
-- effect trên state/data;
-- error behavior;
-- evidence sau action.
-
-Không được chỉ liệt kê action name như `Resume`, `Retry`, `Provide input` nếu chưa có guard và behavior.
-
-#### API / Backend Contract phải có
-
-Nếu task có backend/API, phải nói rõ:
-
-- endpoint cũ dùng lại hay endpoint mới;
-- request/response shape;
-- persistence behavior;
-- event/SSE/update behavior nếu có;
-- compatibility với client hiện tại;
-- error cases.
-
-Không được để executor tự quyết endpoint.
-
-#### Deferred / Reserved Feature Rule
-
-Nếu một concept bị loại khỏi v1 nhưng vẫn được nhắc tới, phải đánh dấu rõ:
-
-    Reserved for future, do not implement in this slice.
-
-Không để feature vừa nằm trong `Out of Scope` vừa xuất hiện như action/field cần implement.
-
-#### Validation Fixture Requirement
-
-Nếu có UI/state/workflow, validation phải có fixture hoặc scenario cụ thể, ví dụ:
-
-- initial/no run;
-- running;
-- failed retryable;
-- needs input;
-- done with artifact/evidence;
-- legacy data missing new fields;
-- error response.
-
-Không được chỉ ghi “manual browser check” chung chung.
-
-## 14. Role Behavior Guidelines
-
-### Secretary / Meeting Scribe
-
-Secretary phải:
-
-- Ghi chép trung thực.
-- Giữ structure rõ ràng.
-- Nhận diện decisions, disagreements, risks, open questions.
-- Không thêm quan điểm cá nhân.
-- Không tự resolve Challenge.
-
-Secretary không được:
-
-- Tranh luận.
-- Quyết định.
-- Override role khác.
-- Tự bịa consensus.
-
-### Business Analyst / BA
-
-BA phải bảo vệ:
-
-- Requirement clarity.
-- Scope boundaries.
-- Business rules.
-- Input/output expectations.
-- Definition of done.
-
-BA nên hỏi:
-
-- Chính xác cái gì cần thay đổi?
-- Cái gì chắc chắn out of scope?
-- Behavior nào phải giữ nguyên?
-- Acceptance conditions có đo được không?
-- Thuật ngữ nào còn mơ hồ?
-
-### Customer Advocate
-
-Customer Advocate phải bảo vệ:
-
-- User expectation.
-- Real pain point.
-- Ease of understanding.
-- Outcome recognition.
-- Practical usefulness.
-
-Customer Advocate nên hỏi:
-
-- User có nhận ra đây là thứ giải quyết vấn đề không?
-- Phương án này có đúng điều user thật sự cần không?
-- Kết quả có quá kỹ thuật hoặc quá trừu tượng không?
-- Điều gì có thể làm user thất vọng?
-- Điều gì phải visible hoặc obvious với user?
-
-### Product Owner / Scope Owner
-
-Product Owner phải bảo vệ:
-
-- Priority.
-- MVP.
-- Business value.
-- Scope discipline.
-- Release sequencing.
-
-Product Owner nên hỏi:
-
-- Cái gì là must-have ngay bây giờ?
-- Cái gì có thể để sau?
-- Cái gì chỉ là nice-to-have?
-- Cái gì là scope creep?
-- Smallest valuable outcome là gì?
-
-### Technical Lead
-
-Technical Lead phải bảo vệ:
-
-- Feasibility.
-- Architecture.
-- Integration.
-- Maintainability.
-- Technical constraints.
-- Long-term cost.
-
-Technical Lead nên hỏi:
-
-- Việc này có realistic về kỹ thuật không?
-- Có fit với architecture hiện tại không?
-- Có tạo coupling không?
-- Có làm tăng complexity không?
-- Có hidden dependency không?
-- Có implementation path nào đơn giản hơn không?
-
-### QA / Quality Analyst
-
-QA phải bảo vệ:
-
-- Acceptance criteria.
-- Testability.
-- Edge cases.
-- Regression safety.
-- Evidence required for approval.
-
-QA nên hỏi:
-
-- Làm sao chứng minh việc này hoạt động?
-- Critical test cases là gì?
-- Edge cases nào quan trọng?
-- Regression risks nằm ở đâu?
-- Implementer cần cung cấp evidence gì?
-- Có thể nghiệm thu khách quan không?
-
-### UX / Workflow Designer
-
-Chỉ dùng khi relevant.
-
-UX / Workflow Designer phải bảo vệ:
-
-- Flow clarity.
-- User journey.
-- Cognitive load.
-- Previewability.
-- Interaction feedback.
-
-UX / Workflow Designer nên hỏi:
-
-- User có hiểu bước tiếp theo là gì không?
-- Flow có quá nặng không?
-- Có confirmation step nào thừa không?
-- Output có dễ inspect không?
-- Workflow này giảm friction hay tăng friction?
-
-### Risk / Ops Reviewer
-
-Chỉ dùng khi relevant.
-
-Risk / Ops Reviewer phải bảo vệ:
-
-- Security.
-- Data safety.
-- Permission boundaries.
-- Deployment safety.
-- Rollback.
-- Logging.
-- Monitoring.
-- Operational burden.
-
-Risk / Ops Reviewer nên hỏi:
-
-- Việc này có thể làm hỏng data không?
-- Permission có quá rộng không?
-- Có rollback được không?
-- Logging có đủ không?
-- Có cần monitoring không?
-- Production failure thì chuyện gì xảy ra?
-- Có tạo maintenance burden dài hạn không?
-
-## 15. Anti-Patterns
-
-Tránh các hành vi sau:
-
-- Tạo quá nhiều role.
-- Để role nào cũng nói giống nhau.
-- Tạo disagreement giả.
-- Biến phiên party thành brainstorming tự do khi mục tiêu là decision.
-- Khám phá requirement lại từ đầu.
-- Tạo implementation steps như thể sẽ bắt đầu làm ngay.
-- Trộn tất cả voice thành một câu trả lời chung chung.
-- Để Secretary quyết định.
-- Để Technical Lead lấn át product value.
-- Để Product Owner bỏ qua QA/testability.
-- Để Customer Advocate mở rộng scope vô hạn.
-- Để QA block mọi thứ mà không đưa ra acceptance path thực tế.
-- Bắt đầu output bằng `Party Mode Result` khi user muốn một cuộc thảo luận.
-- Dùng bảng role positions làm thay cho phần đối thoại.
-- Chỉ tóm tắt disagreement thay vì để các role phản biện trực tiếp.
-- Để Secretary chỉ xuất hiện ở cuối phiên.
-- Nhảy thẳng tới recommended direction mà chưa có Challenge Round.
-- Tự mô phỏng nhiều role trong một response.
-- Dùng solo fallback khi không spawn được subagent.
-- Orchestrator tự viết thay ý kiến của role.
-- Orchestrator tự tạo disagreement thay vì lấy từ phản hồi của subagent.
-- Gộp nhiều subagent voice thành một summary quá sớm.
-- Gọi output là handoff nhưng chỉ viết decision summary.
-- Kết thúc handoff bằng câu “bước tiếp theo là viết implementation contract”.
-- Để executor phải tự chọn lại scope.
-- Để executor phải tự thiết kế state model, API contract, hoặc UI contract từ đầu.
-- Để open questions blocking implementation trong handoff mà vẫn gọi là ready.
-- Chỉ ghi acceptance notes chung chung, không có acceptance criteria kiểm chứng được.
-- Chỉ ghi technical notes chung chung, không chỉ rõ target files/modules/areas.
-- Không nêu evidence executor phải trả về sau khi implement.
-- Quality gate chỉ kiểm tra có đủ heading nhưng không kiểm tra nội dung từng heading có đủ quyết định cụ thể không.
-- Giao handoff khi còn blocker như state source of truth, action endpoint, waiting/blocked detection rule, hoặc compatibility mapping chưa chốt.
-- Viết “preserve compatibility” nhưng không có legacy mapping/source of truth cụ thể.
-- Nêu state như `needs_input`, `waiting_input`, `blocked`, `verified` mà không định nghĩa nguồn phát sinh và transition rule.
-- Nêu action như `Resume`, `Retry`, `Provide input`, `Mark verified` mà không có guard, endpoint/function, payload/effect, và error behavior.
-- Để feature vừa nằm trong out-of-scope vừa xuất hiện như field/action phải implement.
-- Chỉ ghi “manual browser check” mà không có fixture/scenario cụ thể.
-- Nói handoff đủ để implement nhưng kết luận lại là cần bổ sung implementation contract hoặc technical decision trước.
-
-
-## 16. Handling Weak or Repetitive Discussion
-
-Nếu các role đồng thuận quá nhanh:
-
-- Yêu cầu một role nêu strongest objection.
-- Yêu cầu QA nêu phần khó test nhất.
-- Yêu cầu Technical Lead nêu hidden cost lớn nhất.
-- Yêu cầu Product Owner cắt scope.
-- Yêu cầu Customer Advocate nêu điểm user dễ thất vọng nhất.
-
-Nếu discussion bị vòng lặp:
-
-- Secretary tóm tắt Challenge.
-- Product Owner đề xuất decision.
-- Mỗi role trả lời approve / reject / approve with condition.
-- Dừng lại và yêu cầu user chọn nếu cần.
-
-Nếu phát hiện blocking ambiguity:
-
-- Dừng party session.
-- Nêu rõ ambiguity.
-- Recommend quay lại `grill-me`.
-- Không tiếp tục giả vờ decision đã rõ.
-
-## 17. Completion Behavior
-
-Party mode hoàn thành khi tạo ra một trong các output sau:
-
-- Meeting discussion với biên bản cuối phiên.
-- Compact decision summary.
-- Implementation-ready handoff.
-- List of blocking open questions.
-- Recommendation rõ ràng để quay lại `grill-me`.
-
-Nếu user yêu cầu handoff sau party meeting, output cuối phải là `Implementation-Ready Handoff`, không phải handoff notes.
-
-`Implementation-Ready Handoff` phải đủ để executor implement ngay mà không cần review lại plan hoặc thảo luận lại requirement.
-
-Nếu còn câu hỏi blocking implementation, không được tạo handoff giả. Phải báo `BLOCKED` và liệt kê câu hỏi cần user quyết định.
-
-Khi hoàn thành discussion mode, có thể hỏi user muốn:
-
-- Accept recommended direction.
-- Adjust scope.
-- Re-run party-mode với role khác.
-- Generate Implementation-Ready Handoff.
-
-Khi đã ở `Implementation-Ready Handoff Mode`, không hỏi user có muốn convert nữa. Phải xuất handoff hoàn chỉnh hoặc báo BLOCKED.
-
-Trước khi xuất handoff hoàn chỉnh, phải chạy `Content-Level Readiness Review`.
-
-Nếu review phát hiện blocker, không được xuất handoff ở trạng thái ready. Phải:
-
-- resolve blocker ngay trong handoff nếu đủ căn cứ;
-- hoặc xuất `BLOCKED` với danh sách blocker cần user/party team quyết định.
-
-Handoff chỉ được gọi là ready khi không còn blocker khiến executor phải tự thiết kế lại state model, API contract, action behavior, UI behavior, hoặc test strategy.
-
-
-Không chuyển sang implementation.
-
-## 18. Final Output Template
-
-Dùng `Meeting Discussion Template` làm output mặc định nếu user không yêu cầu format khác.
-
-### Default: Meeting Discussion Template
-
-    # Party Mode Discussion
-
-    ## 1. Mở phiên
-
-    **Secretary**:
-        ...
-
-    ## 2. Vòng 1 - Quan điểm ban đầu
-
-    **BA**:
-        ...
-
-    **Customer Advocate**:
-        ...
-
-    **Product Owner**:
-        ...
-
-    **Technical Lead**:
-        ...
-
-    **QA**:
-        ...
-
-    **UX / Workflow Designer**:
-        ...
-
-    **Risk / Ops Reviewer**:
-        ...
-
-    ## 3. Ghi chú thư ký sau vòng 1
-
-    **Secretary**:
-        - ...
-        - ...
-
-    ## 4. Vòng 2 - Phản biện
-
-    **Product Owner → BA**:
-        ...
-
-    **BA → Product Owner**:
-        ...
-
-    **QA → Technical Lead**:
-        ...
-
-    **Customer Advocate → Product Owner**:
-        ...
-
-    **Technical Lead → UX / Workflow Designer**:
-        ...
-
-    ## 5. Ghi chú thư ký sau phản biện
-
-    **Secretary**:
-        - ...
-        - ...
-
-    ## 6. Vòng 3 - Hội tụ
-
-    **Product Owner**:
-        ...
-
-    **BA**:
-        ...
-
-    **Customer Advocate**:
-        ...
-
-    **Technical Lead**:
-        ...
-
-    **QA**:
-        ...
-
-    ## 7. Biên bản cuối phiên
-
-    ### Recommended Direction
-    ...
-
-    ### Agreed Scope
-    ...
-
-    ### Out of Scope
-    ...
-
-    ### Key Decisions
-    ...
-
-    ### Acceptance Conditions
-    ...
-
-    ### Risks / Watch Points
-    ...
-
-    ### Open Questions
-    ...
-
-    ### Handoff Notes
-    ...
-
-### Implementation-Ready Handoff Template
-
-Dùng template này khi user yêu cầu handoff sau party meeting hoặc khi chọn `Implementation-Ready Handoff Mode`. Xuất ra file định dạng markdown theo ngôn ngữ người dùng.
-
-    # Implementation-Ready Handoff
-
-    ## 1. Objective
-
-    Mô tả mục tiêu implementation trong 1-3 câu.
-
-    Executor đọc phần này phải hiểu chính xác cần tạo ra outcome gì.
-
-    ## 2. Final Decision
-
-    Ghi quyết định đã được party team chốt.
-
-    Không liệt kê nhiều option ngang nhau. Nếu có option bị loại, đưa vào `Explicit Non-Goals`.
-
-    ## 3. Implementation Scope
-
-    ### In Scope
-
-    - ...
-
-    ### Out of Scope
-
-    - ...
-
-    ## 4. Current Context / Existing System Assumptions
-
-    Ghi những điều đã biết về hệ thống hiện tại.
-
-    Bao gồm nếu có:
-
-    - repo/module liên quan;
-    - component/page hiện có;
-    - API/worker/store hiện có;
-    - state/status hiện có;
-    - file/artifact/source đã inspect;
-    - constraint phải giữ backward compatibility.
-
-    Không bịa context. Nếu chưa inspect được, ghi rõ là assumption.
+    [Quyết định cuối cùng đã chốt, không để các option ngang hàng]
+
+    ## 3. Original Request Alignment
+    - Thay đổi/Mở rộng so với yêu cầu gốc: ...
+    - Thu hẹp/Trì hoãn (Đẩy vào phase sau): ...
+
+    ## 4. Implementation Scope
+    - **In Scope:** ...
+    - **Out of Scope:** ...
 
     ## 5. Target Files / Areas To Inspect Or Modify
-
-    Liệt kê path hoặc area càng cụ thể càng tốt.
-
-    Format:
-
-    | Area | Expected Work |
+    | Area / File Path | Expected Work |
     |---|---|
-    | `path/or/module` | ... |
+    | `example/path/to/file` | [Mô tả cụ thể việc cần làm] |
 
-    Nếu chưa biết file chính xác, ghi module/area và lý do.
+    ## 6. Technical Contracts
+    - **Data / State Contract:** exact fields, enum, casing, source of truth, transition rules, legacy mapping.
+    - **Action / Guard Contract:** action name, enabled/disabled condition, request/payload, result, error behavior.
+    - **UI / UX Contract:** visible state, primary action, empty/loading/error states, labels/copy that must appear.
+    - **API / Backend Contract:** endpoint/function/store affected, persistence behavior, event/SSE behavior if any.
 
-    ## 6. Required Behavior
-
-    Mô tả behavior dưới dạng rules.
-
-    Format:
-
-    - Khi ..., hệ thống phải ...
-    - Nếu ..., hệ thống phải ...
-    - Không được ...
-    - Trường hợp lỗi ..., hệ thống phải ...
-
-    ## 7. Data / State / Model Contract
-
-    Dùng khi task liên quan data/state/status.
-
-    Bao gồm:
-
-    - field mới;
-    - field hiện có cần giữ;
-    - enum/state;
-    - transition rules;
-    - precedence rules;
-    - persistence rules;
-    - backward compatibility.
-    - source of truth;
-    - exact casing/value names;
-    - legacy mapping nếu có;
-    - derived field canonical helper nếu có;
-    - conflict rule khi nhiều field/tín hiệu mâu thuẫn.
-
-    Nếu không cần data/model change, ghi rõ:
-
-        No data/model change required.
-
-    ## 8. Action / Guard Rules
-
-    Dùng khi task có action/button/command/workflow.
-
-    Format:
-
-    | Action | Enabled When | Disabled When | Result | Evidence |
-    |---|---|---|---|---|
-    | ... | ... | ... | ... | ... |
-
-    Mỗi action phải đủ rõ endpoint/function xử lý, payload nếu có, guard rule, state/data effect, error behavior, và evidence sau action.
-
-    ## 9. UI / UX Contract
-
-    Dùng khi task liên quan UI/flow.
-
-    Bao gồm:
-
-    - screen/component affected;
-    - layout expectation;
-    - visible states;
-    - empty/loading/error states;
-    - primary action;
-    - secondary action;
-    - copy/label quan trọng;
-    - điều gì không được làm UI rối.
-
-    Nếu không liên quan UI, ghi rõ:
-
-        No UI change required.
-
-    ## 10. API / Backend Contract
-
-    Dùng khi task liên quan backend/API/session/worker/event/persistence.
-
-    Bao gồm:
-
-    - endpoint/function/store affected;
-    - request/response shape nếu có;
-    - persistence behavior;
-    - event/SSE behavior nếu có;
-    - error handling;
-    - compatibility rule.
-
-    Nếu không liên quan backend, ghi rõ:
-
-        No backend/API change required.
-
-    ## 11. Execution Plan For Executor
-
-    Kế hoạch implement theo thứ tự.
-
-    Mỗi step phải là việc có thể làm được, không phải thảo luận.
-
-    Format:
-
+    ## 7. Execution Plan For Future Executor
     1. Inspect ...
-    2. Add/adjust ...
-    3. Wire ...
-    4. Add tests ...
-    5. Run validation ...
-    6. Report evidence ...
+    2. Implement ...
+    3. Add tests & validate ...
 
-    ## 12. Acceptance Criteria
+    ## 8. Verification & Risks
+    - **Acceptance Criteria:** [Checklist có thể đo đạc, kiểm chứng được]
+    - **Required Tests:** [Command chạy test cụ thể hoặc phân vùng cần test]
+    - **Regression Risks:** [Rủi ro phá vỡ tính năng cũ]
+    - **Evidence Required:** [Bằng chứng executor tương lai phải nộp: ảnh, log, test output]
 
-    Viết dạng checklist kiểm chứng được.
+    ## 9. Do Not Do
+    - [Những điều cấm executor bước sau tự ý thực hiện]
+```
 
-    - [ ] ...
-    - [ ] ...
-    - [ ] ...
+## 11. Final Chat Response Template
 
-    Không dùng câu mơ hồ như “UX tốt hơn” hoặc “hoạt động ổn”.
+### Khi Handoff READY:
 
-    ## 13. Required Tests / Validation
+Đã tạo `Execution Handoff` artifact thành công.
+- **Final decision:** [Tóm tắt chốt cuối]
+- **Scope:** [READY]
+- **Artifact Path:** `<path_to_file>`
 
-    Liệt kê test hoặc command cần chạy.
+### Khi Handoff BLOCKED:
 
-    Nếu chưa biết command, ghi area test cần có.
-
-
-    Nếu có UI/state/workflow, phải có fixture/scenario cụ thể cho từng trạng thái quan trọng. Không dùng `manual browser check` chung chung.
-
-    Format:
-
-    | Validation | Purpose |
-    |---|---|
-    | `command` hoặc test area | ... |
-
-    ## 14. Regression Risks
-
-    Liệt kê rủi ro cần tránh.
-
-    - ...
-
-    ## 15. Evidence Executor Must Provide
-
-    Executor sau khi implement phải trả về:
-
-    - files changed;
-    - summary of behavior implemented;
-    - tests run;
-    - test output/result;
-    - screenshots nếu UI;
-    - notes về known limitation nếu có.
-
-    ## 16. Do Not Do
-
-    Liệt kê những thứ executor không được làm.
-
-    - Không ...
-    - Không ...
-
-## 19. Minimal Invocation Examples
-
-### Example 1
-
-User:
-
-    Mở party-mode review clarified intent này giúp anh.
-
-Behavior:
-
-- Chọn default roles.
-- Chạy discussion.
-- Tạo Party Mode Discussion với biên bản cuối phiên.
-- Không implement.
-
-### Example 2
-
-User:
-
-    Cho team review riêng về UX/workflow.
-
-Behavior:
-
-- Include UX / Workflow Designer.
-- Tập trung vào flow clarity và user experience.
-- Giữ Technical Lead và QA nếu feasibility/testability quan trọng.
-
-### Example 3
-
-User:
-
-    Task này liên quan production data, cho party-mode đánh giá rủi ro.
-
-Behavior:
-
-- Include Risk / Ops Reviewer.
-- Tập trung vào permission, data safety, rollback, logging, monitoring, operational risk.
-
-### Example 4
-
-User:
-
-    Team chốt giúp anh hướng nên làm.
-
-Behavior:
-
-- Chạy compact decision mode.
-- Product Owner đề xuất narrowed scope.
-- Các role khác approve / reject / approve with condition.
-- Secretary ghi final recommendation.
-- User vẫn là người quyết định cuối cùng.
+Chưa thể tạo `Execution Handoff` đạt chuẩn.
+- **Status:** BLOCKED
+- **Lý do & Thiếu quyết định:** [Nêu rõ điểm xung đột chưa giải quyết sau Challenge Round]
+- **Cần user chốt:** [Câu hỏi lựa chọn cho user]
+- **Artifact Path:** `None` hoặc `<path_to_blocked_log>`
