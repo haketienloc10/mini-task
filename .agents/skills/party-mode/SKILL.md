@@ -1186,7 +1186,7 @@ Dùng `Meeting Discussion Template` làm output mặc định nếu user không 
 
 ### Implementation-Ready Handoff Template
 
-Dùng template này khi user yêu cầu handoff sau party meeting hoặc khi chọn `Implementation-Ready Handoff Mode`.
+Dùng template này khi user yêu cầu handoff sau party meeting hoặc khi chọn `Implementation-Ready Handoff Mode`. Xuất ra file định dạng markdown theo ngôn ngữ người dùng.
 
     # Implementation-Ready Handoff
 
