@@ -44,6 +44,16 @@ enum Commands {
 
     /// Print workflow guide and command reference
     Guide,
+
+    /// Generate a Change Safety Brief for an area
+    Brief {
+        #[arg(long)]
+        area: Vec<String>,
+        #[arg(long)]
+        tag: Vec<String>,
+        #[arg(long)]
+        task: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -62,6 +72,12 @@ enum NoteType {
         handoff: Option<String>,
         #[arg(long)]
         run: Option<String>,
+        #[arg(long)]
+        decision: Vec<String>,
+        #[arg(long)]
+        invariant: Vec<String>,
+        #[arg(long)]
+        risk: Vec<String>,
     },
 }
 
@@ -87,6 +103,16 @@ struct NoteFrontmatter {
     read_when: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     supersedes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    decisions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    invariants: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    risks: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    tests: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    missing_tests: Vec<String>,
 }
 
 // ── Frontmatter parser ───────────────────────────────────────────────────────
@@ -237,6 +263,9 @@ fn cmd_add_continuity(
     tags: Vec<String>,
     handoff: Option<String>,
     run: Option<String>,
+    decisions: Vec<String>,
+    invariants: Vec<String>,
+    risks: Vec<String>,
 ) {
     // Validate required fields
     match (&task, &signal) {
@@ -271,6 +300,11 @@ fn cmd_add_continuity(
         tags,
         read_when: vec![],
         supersedes: vec![],
+        decisions,
+        invariants,
+        risks,
+        tests: vec![],
+        missing_tests: vec![],
     };
 
     let yaml = serde_yaml::to_string(&fm).expect("Failed to serialize frontmatter");
@@ -315,6 +349,10 @@ fn load_all_notes() -> Vec<(PathBuf, NoteFrontmatter)> {
         }
     }
     notes
+}
+
+fn collect_superseded_ids(notes: &[(PathBuf, NoteFrontmatter)]) -> std::collections::HashSet<String> {
+    notes.iter().flat_map(|(_, fm)| fm.supersedes.iter().cloned()).collect()
 }
 
 fn cmd_recall(areas: Vec<String>, tags: Vec<String>, task: Option<String>, limit: usize) {
@@ -385,6 +423,94 @@ fn cmd_recall(areas: Vec<String>, tags: Vec<String>, task: Option<String>, limit
         println!("date:   {}", fm.created_at);
         println!();
     }
+}
+
+fn build_brief(
+    all_notes: Vec<(PathBuf, NoteFrontmatter)>,
+    areas: Vec<String>,
+    tags: Vec<String>,
+    task: Option<String>,
+) -> String {
+    // Build filter summary for the header line
+    let mut filter_parts: Vec<String> = areas.clone();
+    for t in &tags {
+        filter_parts.push(format!("tag:{t}"));
+    }
+    if let Some(ref t) = task {
+        filter_parts.push(format!("task:{t}"));
+    }
+    let filter_summary = if filter_parts.is_empty() {
+        "(all)".to_string()
+    } else {
+        filter_parts.join(", ")
+    };
+
+    // Build superseded_ids and filter
+    let superseded_ids = collect_superseded_ids(&all_notes);
+    let notes: Vec<_> = all_notes.into_iter().filter(|(_, fm)| !superseded_ids.contains(&fm.id)).collect();
+
+    let filter = RecallFilter { areas: areas.clone(), tags, task };
+    let has_filter = !filter.areas.is_empty() || !filter.tags.is_empty() || filter.task.is_some();
+
+    let mut scored: Vec<(i32, String, NoteFrontmatter)> = notes
+        .into_iter()
+        .map(|(_, fm)| {
+            let s = if has_filter { score_note(&fm, &filter) } else { 0 };
+            let date = fm.created_at.clone();
+            (s, date, fm)
+        })
+        .filter(|(s, _, _)| !has_filter || *s > 0)
+        .collect();
+
+    let mut out = String::new();
+    out.push_str("=== Change Safety Brief ===\n");
+    out.push_str(&format!("area: {filter_summary}\n"));
+
+    if scored.is_empty() {
+        let area_str = areas.first().map(String::as_str).unwrap_or(&filter_summary);
+        out.push_str("\nNo project memory found for this area.\n");
+        out.push_str(&format!("Run 'pnotes recall --area {area_str}' to explore related notes,\n"));
+        out.push_str(&format!("or 'pnotes add continuity --task <slug> --signal \"...\" --area {area_str}'\n"));
+        out.push_str("to start capturing context.\n");
+        return out;
+    }
+
+    // Sort: score DESC, then created_at DESC; take top 3
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
+    let top: Vec<_> = scored.into_iter().take(3).map(|(_, _, fm)| fm).collect();
+
+    out.push_str(&format!("notes: {} matched\n\n", top.len()));
+
+    let sections: &[(&str, fn(&NoteFrontmatter) -> &Vec<String>)] = &[
+        ("DECISIONS", |fm| &fm.decisions),
+        ("INVARIANTS", |fm| &fm.invariants),
+        ("RISKS", |fm| &fm.risks),
+        ("TESTS", |fm| &fm.tests),
+        ("MISSING TESTS", |fm| &fm.missing_tests),
+    ];
+
+    for (name, getter) in sections {
+        out.push_str(&format!("{name}\n"));
+        let mut has_items = false;
+        for fm in &top {
+            for item in getter(fm) {
+                out.push_str(&format!("- {item} (from: {}, {})\n", fm.id, fm.created_at));
+                has_items = true;
+            }
+        }
+        if !has_items {
+            out.push_str("(none)\n");
+        }
+        out.push('\n');
+    }
+
+    out
+}
+
+fn cmd_brief(areas: Vec<String>, tags: Vec<String>, task: Option<String>) {
+    let notes = load_all_notes();
+    let output = build_brief(notes, areas, tags, task);
+    print!("{output}");
 }
 
 fn cmd_show(id: &str) {
@@ -461,11 +587,12 @@ fn main() {
     match cli.command {
         Commands::Init => cmd_init(),
         Commands::Add {
-            note_type: NoteType::Continuity { task, signal, area, tag, handoff, run },
-        } => cmd_add_continuity(task, signal, area, tag, handoff, run),
+            note_type: NoteType::Continuity { task, signal, area, tag, handoff, run, decision, invariant, risk },
+        } => cmd_add_continuity(task, signal, area, tag, handoff, run, decision, invariant, risk),
         Commands::Recall { area, tag, task, limit } => cmd_recall(area, tag, task, limit),
         Commands::Show { id } => cmd_show(&id),
         Commands::Guide => cmd_guide(),
+        Commands::Brief { area, tag, task } => cmd_brief(area, tag, task),
     }
 }
 
@@ -488,6 +615,11 @@ mod tests {
             tags: tags.into_iter().map(String::from).collect(),
             read_when: vec![],
             supersedes: vec![],
+            decisions: vec![],
+            invariants: vec![],
+            risks: vec![],
+            tests: vec![],
+            missing_tests: vec![],
         }
     }
 
@@ -581,5 +713,106 @@ id: [bad yaml
 "#;
         let result = parse_frontmatter(content);
         assert!(result.is_err());
+    }
+
+    // Helper: wrap a NoteFrontmatter into the Vec format expected by build_brief
+    fn wrap(fm: NoteFrontmatter) -> Vec<(PathBuf, NoteFrontmatter)> {
+        vec![(PathBuf::from("fake.md"), fm)]
+    }
+
+    #[test]
+    fn test_brief_empty() {
+        let out = build_brief(vec![], vec!["src/no-such-area".to_string()], vec![], None);
+        assert!(out.contains("No project memory found for this area."));
+        assert!(out.contains("area: src/no-such-area"));
+    }
+
+    #[test]
+    fn test_brief_superseded_excluded() {
+        let mut note_a = make_fm("note-a", vec!["src/foo"], vec![], "signal a");
+        note_a.decisions = vec!["Decision from A".to_string()];
+
+        let mut note_b = make_fm("note-b", vec!["src/foo"], vec![], "signal b");
+        note_b.supersedes = vec!["2026-05-25-note-a".to_string()];
+        note_b.decisions = vec!["Decision from B".to_string()];
+
+        let notes = vec![
+            (PathBuf::from("note-a.md"), note_a),
+            (PathBuf::from("note-b.md"), note_b),
+        ];
+        let out = build_brief(notes, vec!["src/foo".to_string()], vec![], None);
+        assert!(!out.contains("Decision from A"), "superseded note-a should be excluded");
+        assert!(out.contains("Decision from B"));
+    }
+
+    #[test]
+    fn test_brief_two_notes_no_supersede() {
+        let mut note_a = make_fm("note-a", vec!["src/foo"], vec![], "signal a");
+        note_a.decisions = vec!["Decision A".to_string()];
+
+        let mut note_b = make_fm("note-b", vec!["src/foo"], vec![], "signal b");
+        note_b.id = "2026-05-24-note-b".to_string();
+        note_b.created_at = "2026-05-24".to_string();
+        note_b.decisions = vec!["Decision B".to_string()];
+
+        let notes = vec![
+            (PathBuf::from("note-a.md"), note_a),
+            (PathBuf::from("note-b.md"), note_b),
+        ];
+        let out = build_brief(notes, vec!["src/foo".to_string()], vec![], None);
+        assert!(out.contains("Decision A"));
+        assert!(out.contains("Decision B"));
+        assert!(out.contains("from: 2026-05-25-note-a, 2026-05-25"));
+        assert!(out.contains("from: 2026-05-24-note-b, 2026-05-24"));
+    }
+
+    #[test]
+    fn test_brief_backward_compat() {
+        // Legacy note without the 5 new fields
+        let content = r#"---
+id: "2026-05-25-legacy"
+type: "continuity"
+task: "legacy"
+created_at: "2026-05-25"
+signal: "legacy signal"
+areas:
+  - src/foo
+---
+"#;
+        let fm = parse_frontmatter(content).expect("legacy note should parse without error");
+        assert!(fm.decisions.is_empty());
+        assert!(fm.invariants.is_empty());
+
+        let out = build_brief(wrap(fm), vec!["src/foo".to_string()], vec![], None);
+        assert!(out.contains("(none)"), "empty sections should show (none)");
+    }
+
+    #[test]
+    fn test_add_continuity_with_capture_flags() {
+        // Verify that decisions/invariants/risks round-trip through YAML serialization
+        let fm = NoteFrontmatter {
+            id: "2026-05-25-capture-test".to_string(),
+            note_type: "continuity".to_string(),
+            task: "capture-test".to_string(),
+            created_at: "2026-05-25".to_string(),
+            signal: "test signal".to_string(),
+            run: None,
+            handoff: None,
+            areas: vec![],
+            tags: vec![],
+            read_when: vec![],
+            supersedes: vec![],
+            decisions: vec!["D1".to_string()],
+            invariants: vec!["I1".to_string()],
+            risks: vec!["R1".to_string()],
+            tests: vec![],
+            missing_tests: vec![],
+        };
+        let yaml = serde_yaml::to_string(&fm).expect("serialize ok");
+        let content = format!("---\n{yaml}---\n");
+        let parsed = parse_frontmatter(&content).expect("parse ok");
+        assert_eq!(parsed.decisions, vec!["D1"]);
+        assert_eq!(parsed.invariants, vec!["I1"]);
+        assert_eq!(parsed.risks, vec!["R1"]);
     }
 }
