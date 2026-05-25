@@ -528,19 +528,29 @@ Format:
 
     ### 8. Lựa chọn tiếp theo
 
-    Secretary:
-    Biên bản cuộc họp đã hoàn tất. Anh muốn em xuất kết quả theo hướng nào?
+    **Secretary**:
+        Biên bản cuộc họp đã hoàn tất. Anh muốn em xuất kết quả theo hướng nào?
 
-    1. Xuất biên bản cuộc họp thành file `.md`
-       - Phù hợp khi anh muốn lưu lại discussion, decision, disagreement, scope, risks, open questions.
+        1. Xuất biên bản đầy đủ quá trình họp thành file `.md`
+           - Đây là meeting transcript có cấu trúc, không phải bản tóm tắt.
+           - Phải ghi lại diễn biến chính của phiên họp theo thứ tự:
+             - Secretary mở phiên.
+             - Từng subagent phát biểu quan điểm ban đầu.
+             - Secretary ghi live notes sau vòng 1.
+             - Từng subagent hỏi/challenge nhau trong Challenge Round.
+             - Từng subagent phản hồi lại challenge nếu có.
+             - Secretary ghi live notes sau phản biện.
+             - Vòng hội tụ.
+             - Biên bản cuối phiên.
 
-    2. Xuất `Execution Handoff`
-       - Phù hợp khi anh đã chốt hướng và muốn tạo contract đủ rõ để executor implement ngay.
+        2. Xuất `Execution Handoff`
+           - Tạo implementation-ready contract để executor có thể implement ngay.
+           - Không bao gồm toàn bộ transcript, chỉ giữ decision/contract cần thiết cho executor.
 
-    3. Xuất cả 2
-       - Tạo cả biên bản cuộc họp và `Execution Handoff`.
+        3. Xuất cả 2 file
+           - Tạo cả meeting transcript đầy đủ và `Execution Handoff`.
 
-    Nếu còn open question blocking implementation, option 2 và 3 phải báo `BLOCKED` cho phần handoff thay vì tạo handoff giả.
+        Nếu còn open question blocking implementation, option 2 và 3 phải báo `BLOCKED` cho phần handoff thay vì tạo handoff giả.
 
 ## 12. Secretary Notes Throughout the Session
 
@@ -1060,6 +1070,22 @@ Dùng `Meeting Discussion Template` làm output mặc định nếu user không 
 
     ### Handoff Notes
     ...
+
+    ## 8. Lựa chọn tiếp theo
+
+    **Secretary**:
+        Biên bản cuộc họp đã hoàn tất. Anh muốn em xuất kết quả theo hướng nào?
+
+        1. Xuất biên bản đầy đủ quá trình họp thành file `.md`
+           - Meeting transcript có cấu trúc, ghi lại từng vòng họp và từng lượt subagent hỏi/challenge nhau.
+
+        2. Xuất `Execution Handoff`
+           - Implementation-ready contract để executor có thể implement ngay.
+
+        3. Xuất cả 2 file
+           - Tạo cả meeting transcript đầy đủ và `Execution Handoff`.
+
+        Nếu còn open question blocking implementation, phần `Execution Handoff` phải báo `BLOCKED` thay vì tạo handoff giả.
 
 ### Implementation-Ready Handoff Template
 
