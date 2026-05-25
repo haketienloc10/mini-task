@@ -10,7 +10,9 @@ const state = {
   terminalViewMode: 'pretty',
   taskEventSource: null,
   terminalEventSource: null,
-  terminalStreamTaskId: null
+  terminalStreamTaskId: null,
+  taskReconnectTimer: null,
+  terminalReconnectTimer: null
 };
 
 let isLoadingData = false;
@@ -81,6 +83,7 @@ function bindEvents() {
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
       closeTaskStream();
+      closeTerminalStream();
       return;
     }
     syncTaskStream();
@@ -230,6 +233,7 @@ function renderTaskData() {
 function syncTaskStream() {
   if (document.hidden || state.taskEventSource) return;
 
+  clearTaskReconnect();
   state.taskEventSource = new EventSource('/api/tasks/events');
   state.taskEventSource.addEventListener('task-snapshot', (event) => {
     state.tasks = JSON.parse(event.data);
@@ -250,13 +254,30 @@ function syncTaskStream() {
   state.taskEventSource.addEventListener('error', () => {
     if (state.taskEventSource?.readyState === EventSource.CLOSED) {
       closeTaskStream();
+      scheduleTaskReconnect();
     }
   });
 }
 
 function closeTaskStream() {
+  clearTaskReconnect();
   state.taskEventSource?.close();
   state.taskEventSource = null;
+}
+
+function scheduleTaskReconnect() {
+  if (document.hidden || state.taskReconnectTimer || state.taskEventSource) return;
+  state.taskReconnectTimer = setTimeout(() => {
+    state.taskReconnectTimer = null;
+    syncTaskStream();
+    loadData().catch((error) => console.error(error));
+  }, 1000);
+}
+
+function clearTaskReconnect() {
+  if (!state.taskReconnectTimer) return;
+  clearTimeout(state.taskReconnectTimer);
+  state.taskReconnectTimer = null;
 }
 
 function mergeTask(task) {
@@ -528,8 +549,10 @@ function renderChat() {
   }
 
   if (state.activeDetailTab === 'terminal') {
+    const shouldStick = shouldStickToBottom(refs.chatArea);
+    const previousScrollTop = refs.chatArea.scrollTop;
     refs.chatArea.innerHTML = renderTerminalDetail(task);
-    refs.chatArea.scrollTop = refs.chatArea.scrollHeight;
+    restoreScrollPosition(refs.chatArea, shouldStick, previousScrollTop);
     return;
   }
 
@@ -560,6 +583,8 @@ function renderChat() {
     return;
   }
 
+  const shouldStick = shouldStickToBottom(refs.chatArea);
+  const previousScrollTop = refs.chatArea.scrollTop;
   refs.chatArea.innerHTML = messages.map((message) => `
     <div class="chat-message ${message.sender}">
       <span class="sender-label">${message.sender === 'user' ? 'User' : 'Agent'}</span>
@@ -569,7 +594,7 @@ function renderChat() {
       <span class="msg-time">${formatDate(message.createdAt)}</span>
     </div>
   `).join('');
-  refs.chatArea.scrollTop = refs.chatArea.scrollHeight;
+  restoreScrollPosition(refs.chatArea, shouldStick, previousScrollTop);
 }
 
 function renderTaskOverview(task) {
@@ -879,24 +904,47 @@ function terminalLine(kind, text) {
 
 function syncTerminalStream() {
   const task = selectedTask();
-  if (!isTaskDetailRoute() || !task) {
+  if (document.hidden || !isTaskDetailRoute() || !task) {
     closeTerminalStream();
     return;
   }
   if (state.terminalStreamTaskId === task.id && state.terminalEventSource) return;
 
+  clearTerminalReconnect();
   closeTerminalStream();
   state.terminalStreamTaskId = task.id;
   state.terminalEventSource = new EventSource(`/api/tasks/${encodeURIComponent(task.id)}/terminal-events`);
   state.terminalEventSource.addEventListener('terminal', (event) => {
     mergeTerminalEvent(task.id, JSON.parse(event.data));
   });
+  state.terminalEventSource.addEventListener('error', () => {
+    if (state.terminalEventSource?.readyState === EventSource.CLOSED) {
+      closeTerminalStream();
+      scheduleTerminalReconnect();
+    }
+  });
 }
 
 function closeTerminalStream() {
+  clearTerminalReconnect();
   state.terminalEventSource?.close();
   state.terminalEventSource = null;
   state.terminalStreamTaskId = null;
+}
+
+function scheduleTerminalReconnect() {
+  if (document.hidden || state.terminalReconnectTimer || state.terminalEventSource) return;
+  if (!isTaskDetailRoute() || !selectedTask()) return;
+  state.terminalReconnectTimer = setTimeout(() => {
+    state.terminalReconnectTimer = null;
+    syncTerminalStream();
+  }, 1000);
+}
+
+function clearTerminalReconnect() {
+  if (!state.terminalReconnectTimer) return;
+  clearTimeout(state.terminalReconnectTimer);
+  state.terminalReconnectTimer = null;
 }
 
 function mergeTerminalEvent(taskId, event) {
@@ -1038,6 +1086,14 @@ function tokenUsageForTask(task) {
 
 function formatTokenCount(value) {
   return Number.isFinite(value) ? new Intl.NumberFormat().format(value) : 'N/A';
+}
+
+function shouldStickToBottom(element) {
+  return element.scrollHeight - element.scrollTop - element.clientHeight < 48;
+}
+
+function restoreScrollPosition(element, shouldStick, previousScrollTop) {
+  element.scrollTop = shouldStick ? element.scrollHeight : previousScrollTop;
 }
 
 function shortRef(value) {

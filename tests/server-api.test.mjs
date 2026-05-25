@@ -324,6 +324,84 @@ test('HTTP API streams task lifecycle updates', async () => {
   }
 });
 
+test('HTTP API does not stream task lifecycle updates for terminal-only changes', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'codex-task-lifecycle-terminal-noise-'));
+  const workspace = await mkdtemp(path.join(root, 'workspace-'));
+  const homeCodexDir = await createCodexAgents(root, ['generator']);
+  const command = path.join(root, 'slow-output-runner.mjs');
+  await writeFile(command, [
+    '#!/usr/bin/env node',
+    'import { setTimeout as delay } from "node:timers/promises";',
+    'console.log(JSON.stringify({ type: "thread.started", thread_id: "slow-session" }));',
+    'for (let index = 0; index < 3; index += 1) {',
+    '  console.log(JSON.stringify({ type: "item.started", item: { type: "tool_call", name: `step-${index}` } }));',
+    '  await delay(350);',
+    '}',
+    'console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "slow final output" } }));'
+  ].join('\n'), 'utf8');
+  await chmod(command, 0o755);
+
+  const store = new TaskStore({ dataDir: path.join(root, 'data') });
+  const server = createServer({
+    store,
+    runnerOptions: {
+      command,
+      homeCodexDir,
+      timeoutMs: 5000
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const controller = new AbortController();
+
+  try {
+    const project = await request(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      body: JSON.stringify({ name: 'Terminal Noise Project', workspacePath: workspace })
+    });
+
+    const streamResponse = await fetch(`${baseUrl}/api/tasks/events`, {
+      signal: controller.signal
+    });
+    assert.equal(streamResponse.ok, true);
+
+    let taskId;
+    const updatesPromise = readTerminalEvents(streamResponse, (events) => {
+      const taskEvents = events.filter((event) => !Array.isArray(event) && event.id === taskId);
+      return taskEvents.some((task) => task.status === 'Done');
+    });
+
+    const task = await request(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      body: JSON.stringify({
+        projectId: project.id,
+        title: 'Terminal noise task',
+        description: 'Do not spam lifecycle updates',
+        subagent: 'generator',
+        notes: ''
+      })
+    });
+    taskId = task.id;
+
+    const startedRun = await request(`${baseUrl}/api/tasks/${task.id}/run`, { method: 'POST' });
+    assert.equal(startedRun.status, 'Running');
+
+    const events = await Promise.race([
+      updatesPromise,
+      delay(5000).then(() => assert.fail('Timed out waiting for task lifecycle completion'))
+    ]);
+    const taskEvents = events.filter((event) => !Array.isArray(event) && event.id === task.id);
+    const runningEvents = taskEvents.filter((event) => event.status === 'Running');
+    assert.equal(runningEvents.length <= 2, true);
+    assert.equal(taskEvents.some((event) => event.status === 'Done'), true);
+  } finally {
+    controller.abort();
+    await new Promise((resolve) => server.close(resolve));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('HTTP API exposes, accepts, and runs default task mode', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'codex-task-dispatch-api-default-mode-'));
   const workspace = await mkdtemp(path.join(root, 'workspace-'));

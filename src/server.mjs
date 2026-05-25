@@ -17,7 +17,7 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
   const taskClients = new Set();
   let pollTimer = null;
   let pollChain = Promise.resolve();
-  const knownTaskUpdatedAt = new Map();
+  const knownTaskSignatures = new Map();
   let initPromise = null;
   const ensureStoreReady = async () => {
     initPromise ??= store.init().then(() => recoverInterruptedRunningTasks(store));
@@ -32,11 +32,12 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
   const pollTaskChanges = async () => {
     const tasks = await store.listTasks();
     for (const task of tasks) {
-      const previousUpdatedAt = knownTaskUpdatedAt.get(task.id);
-      if (previousUpdatedAt && previousUpdatedAt !== task.updatedAt) {
+      const signature = taskUpdateSignature(task);
+      const previousSignature = knownTaskSignatures.get(task.id);
+      if (previousSignature && previousSignature !== signature) {
         publishTaskEvent('task-updated', task);
       }
-      knownTaskUpdatedAt.set(task.id, task.updatedAt);
+      knownTaskSignatures.set(task.id, signature);
 
       const clients = terminalClients.get(task.id);
       if (!clients) continue;
@@ -247,7 +248,7 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
           error: '',
           tokenUsage: null
         });
-        knownTaskUpdatedAt.set(startedTask.id, startedTask.updatedAt);
+        knownTaskSignatures.set(startedTask.id, taskUpdateSignature(startedTask));
         const workerRef = startTaskWorker({
           taskId: task.id,
           dataDir: store.dataDir,
@@ -333,6 +334,18 @@ function processExists(pid) {
   } catch {
     return false;
   }
+}
+
+function taskUpdateSignature(task) {
+  const {
+    currentRunRef,
+    terminalEvents,
+    updatedAt,
+    workerHeartbeatAt,
+    workerRef,
+    ...taskState
+  } = task;
+  return JSON.stringify(taskState);
 }
 
 async function validateTaskInput(body, store, runnerOptions) {

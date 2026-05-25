@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -8,6 +8,7 @@ export class TaskStore {
   constructor({ dataDir = path.resolve('data') } = {}) {
     this.dataDir = dataDir;
     this.tasksFile = path.join(dataDir, 'tasks.json');
+    this.tasksLockDir = path.join(dataDir, 'tasks.json.lock');
     this.projectsFile = path.join(dataDir, 'projects.json');
     this.runsDir = path.join(dataDir, 'runs');
   }
@@ -172,41 +173,42 @@ export class TaskStore {
       terminalEvents: [],
       messages: []
     };
-    const tasks = await this.#readTasks();
-    tasks.push(task);
-    await this.#writeTasks(tasks);
-    return task;
+    return this.#mutateTasks((tasks) => {
+      tasks.push(task);
+      return task;
+    });
   }
 
   async updateTask(id, patch) {
-    const tasks = await this.#readTasks();
-    const index = tasks.findIndex((task) => task.id === id);
-    if (index === -1) return null;
+    return this.#mutateTasks((tasks) => {
+      const index = tasks.findIndex((task) => task.id === id);
+      if (index === -1) return null;
 
-    const status = patch.status ?? tasks[index].status;
-    if (!STATUS.has(status)) {
-      throw new Error(`Unsupported task status: ${status}`);
-    }
+      const status = patch.status ?? tasks[index].status;
+      if (!STATUS.has(status)) {
+        throw new Error(`Unsupported task status: ${status}`);
+      }
 
-    tasks[index] = {
-      ...tasks[index],
-      ...patch,
-      updatedAt: new Date().toISOString()
-    };
-    await this.#writeTasks(tasks);
-    return tasks[index];
+      tasks[index] = {
+        ...tasks[index],
+        ...patch,
+        updatedAt: new Date().toISOString()
+      };
+      return tasks[index];
+    });
   }
 
   async deleteTask(id) {
-    const tasks = await this.#readTasks();
-    const task = tasks.find((candidate) => candidate.id === id);
-    if (!task) return null;
-    if (task.status === 'Running') {
-      throw new Error('Running tasks cannot be deleted');
-    }
+    return this.#mutateTasks((tasks) => {
+      const task = tasks.find((candidate) => candidate.id === id);
+      if (!task) return null;
+      if (task.status === 'Running') {
+        throw new Error('Running tasks cannot be deleted');
+      }
 
-    await this.#writeTasks(tasks.filter((candidate) => candidate.id !== id));
-    return task;
+      tasks.splice(0, tasks.length, ...tasks.filter((candidate) => candidate.id !== id));
+      return task;
+    });
   }
 
   async deleteProject(id) {
@@ -214,29 +216,30 @@ export class TaskStore {
     const project = projects.find((candidate) => candidate.id === id);
     if (!project) return null;
 
-    const tasks = await this.#readTasks();
-    const projectTasks = tasks.filter((task) => task.projectId === id);
-    if (projectTasks.some((task) => task.status === 'Running')) {
-      throw new Error('Projects with running tasks cannot be deleted');
-    }
-
+    const projectTasks = await this.#mutateTasks((tasks) => {
+      const projectTasks = tasks.filter((task) => task.projectId === id);
+      if (projectTasks.some((task) => task.status === 'Running')) {
+        throw new Error('Projects with running tasks cannot be deleted');
+      }
+      tasks.splice(0, tasks.length, ...tasks.filter((task) => task.projectId !== id));
+      return projectTasks;
+    });
     await this.#writeProjects(projects.filter((candidate) => candidate.id !== id));
-    await this.#writeTasks(tasks.filter((task) => task.projectId !== id));
     return { project, tasks: projectTasks };
   }
 
   async appendTerminalEvent(id, event) {
-    const tasks = await this.#readTasks();
-    const index = tasks.findIndex((task) => task.id === id);
-    if (index === -1) return null;
+    return this.#mutateTasks((tasks) => {
+      const index = tasks.findIndex((task) => task.id === id);
+      if (index === -1) return null;
 
-    tasks[index] = {
-      ...tasks[index],
-      terminalEvents: [...(tasks[index].terminalEvents || []), event],
-      updatedAt: new Date().toISOString()
-    };
-    await this.#writeTasks(tasks);
-    return tasks[index];
+      tasks[index] = {
+        ...tasks[index],
+        terminalEvents: [...(tasks[index].terminalEvents || []), event],
+        updatedAt: new Date().toISOString()
+      };
+      return tasks[index];
+    });
   }
 
   async createRunArtifact(taskId, sessionRef) {
@@ -251,6 +254,10 @@ export class TaskStore {
 
   async #readTasks() {
     await this.init();
+    return this.#readTasksFile();
+  }
+
+  async #readTasksFile() {
     const raw = await readFile(this.tasksFile, 'utf8');
     return JSON.parse(raw);
   }
@@ -260,6 +267,44 @@ export class TaskStore {
     const tmpFile = `${this.tasksFile}.tmp`;
     await writeFile(tmpFile, `${JSON.stringify(tasks, null, 2)}\n`, 'utf8');
     await rename(tmpFile, this.tasksFile);
+  }
+
+  async #mutateTasks(mutator) {
+    await this.init();
+    return this.#withTasksLock(async () => {
+      const tasks = await this.#readTasksFile();
+      const result = mutator(tasks);
+      await this.#writeTasks(tasks);
+      return result;
+    });
+  }
+
+  async #withTasksLock(callback) {
+    await mkdir(this.dataDir, { recursive: true });
+    const startedAt = Date.now();
+    while (true) {
+      try {
+        await mkdir(this.tasksLockDir);
+        break;
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+        const lockStats = await stat(this.tasksLockDir).catch(() => null);
+        if (lockStats && Date.now() - lockStats.mtimeMs > 30000) {
+          await rm(this.tasksLockDir, { recursive: true, force: true });
+          continue;
+        }
+        if (Date.now() - startedAt > 5000) {
+          throw new Error('Timed out waiting for tasks store lock');
+        }
+        await delay(10);
+      }
+    }
+
+    try {
+      return await callback();
+    } finally {
+      await rm(this.tasksLockDir, { recursive: true, force: true });
+    }
   }
 
   async #readProjects() {
@@ -274,4 +319,8 @@ export class TaskStore {
     await writeFile(tmpFile, `${JSON.stringify(projects, null, 2)}\n`, 'utf8');
     await rename(tmpFile, this.projectsFile);
   }
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
