@@ -4,3 +4,5 @@
 {"area":".","cmd":"recall","result_count":0,"tag":null,"task":null,"ts":"2026-05-28T01:13:23.649833657+07:00"}
 {"area":".","cmd":"brief","result_count":0,"tag":null,"task":null,"ts":"2026-05-28T01:16:33.679141103+07:00"}
 {"cmd":"add","has_area":true,"has_decision":true,"has_tag":true,"task_slug":"move-project-delete-to-workspace","ts":"2026-05-28T01:18:20.244409236+07:00"}
+{"area":"public/styles.css","cmd":"brief","result_count":1,"tag":null,"task":null,"ts":"2026-05-28T01:21:40.239996641+07:00"}
+{"cmd":"add","has_area":true,"has_decision":true,"has_tag":true,"task_slug":"fix-project-select-dark-mode-color","ts":"2026-05-28T01:22:00.945874142+07:00"}

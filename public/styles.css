@@ -313,8 +313,12 @@ h1 {
 .project-select {
   display: grid;
   gap: 8px;
+  width: 100%;
   min-width: 0;
+  padding: 0;
   text-align: left;
+  color: inherit;
+  background: transparent;
 }
 
 .project-delete-button {
