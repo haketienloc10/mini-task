@@ -47,7 +47,6 @@ const refs = {
   metaThemeColor: document.querySelector('#meta-theme-color'),
   projectModal: document.querySelector('#projectModal'),
   newProjectBtn: document.querySelector('#newProjectBtn'),
-  deleteProjectBtn: document.querySelector('#deleteProjectBtn'),
   needsInputFilterBtn: document.querySelector('#needsInputFilterBtn'),
   closeProjectModal: document.querySelector('#closeProjectModal'),
   projectForm: document.querySelector('#projectForm'),
@@ -104,7 +103,6 @@ function bindEvents() {
   });
 
   refs.newProjectBtn.addEventListener('click', () => openModal(refs.projectModal, refs.projectFormMessage));
-  refs.deleteProjectBtn.addEventListener('click', deleteSelectedProject);
   refs.closeProjectModal.addEventListener('click', () => closeModal(refs.projectModal));
 
   refs.newTaskBtn.addEventListener('click', async () => {
@@ -221,7 +219,6 @@ function renderSubagentOptions() {
 
 function render() {
   refs.newTaskBtn.disabled = !state.projects.length;
-  refs.deleteProjectBtn.disabled = !selectedProject();
   renderRoute();
   renderTaskData();
   syncTerminalStream();
@@ -341,16 +338,27 @@ function renderProjects() {
     const running = tasks.filter((task) => task.status === 'Running').length;
     const done = tasks.filter((task) => task.status === 'Done').length;
     return `
-      <button class="project-item ${project.id === state.selectedProjectId ? 'active' : ''}" data-project-id="${project.id}" type="button">
-        <span class="project-name">${escapeHtml(project.name)}</span>
-        <span class="project-description">${escapeHtml(project.description || 'No description')}</span>
-        <span class="project-path">${escapeHtml(project.workspacePath || 'No workspace')}</span>
-        <span class="project-stats">
-          <span>${tasks.length} tasks</span>
-          <span>${running} running</span>
-          <span>${done} done</span>
-        </span>
-      </button>
+      <article class="project-item ${project.id === state.selectedProjectId ? 'active' : ''}">
+        <button class="project-select" data-project-id="${project.id}" type="button">
+          <span class="project-name">${escapeHtml(project.name)}</span>
+          <span class="project-description">${escapeHtml(project.description || 'No description')}</span>
+          <span class="project-path">${escapeHtml(project.workspacePath || 'No workspace')}</span>
+          <span class="project-stats">
+            <span>${tasks.length} tasks</span>
+            <span>${running} running</span>
+            <span>${done} done</span>
+          </span>
+        </button>
+        <button class="icon-danger-button project-delete-button" data-delete-project-id="${project.id}" type="button" aria-label="Delete project ${escapeHtml(project.name)}" title="Delete project">
+          <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+            <path d="M3 6h18"></path>
+            <path d="M8 6V4h8v2"></path>
+            <path d="M19 6l-1 14H6L5 6"></path>
+            <path d="M10 11v5"></path>
+            <path d="M14 11v5"></path>
+          </svg>
+        </button>
+      </article>
     `;
   }).join('');
 
@@ -361,6 +369,11 @@ function renderProjects() {
       state.selectedTaskId = tasks[0]?.id ?? null;
       window.location.hash = '';
       loadSubagents(state.selectedProjectId).then(render);
+    });
+  });
+  refs.projectList.querySelectorAll('[data-delete-project-id]').forEach((button) => {
+    button.addEventListener('click', () => {
+      deleteProject(button.dataset.deleteProjectId);
     });
   });
 }
@@ -492,8 +505,8 @@ function renderTaskPreview() {
   });
 }
 
-async function deleteSelectedProject() {
-  const project = selectedProject();
+async function deleteProject(projectId) {
+  const project = state.projects.find((candidate) => candidate.id === projectId);
   if (!project) return;
   if (!confirm(`Delete project "${project.name}" and all of its tasks?`)) return;
 

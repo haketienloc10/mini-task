@@ -288,10 +288,11 @@ h1 {
 
 .project-item {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 8px;
   width: 100%;
   padding: 14px;
-  text-align: left;
   color: var(--text-soft);
   background: var(--surface-muted);
   border: 1px solid var(--border);
@@ -307,6 +308,23 @@ h1 {
 .project-item.active {
   border-left-color: var(--accent);
   background: var(--surface-strong);
+}
+
+.project-select {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  text-align: left;
+}
+
+.project-delete-button {
+  width: 32px;
+  height: 32px;
+}
+
+.project-delete-button svg {
+  width: 16px;
+  height: 16px;
 }
 
 .project-name {
