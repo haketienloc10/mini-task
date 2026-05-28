@@ -602,6 +602,25 @@ h1, h2, h3, p { margin: 0; }
   align-items: start;
 }
 
+.projects-mode .workspace-layout {
+  grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+}
+
+.tasks-mode .workspace-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+}
+
+.projects-mode .task-board,
+.projects-mode .task-preview-panel,
+.projects-mode #needsInputFilterBtn,
+.projects-mode .filter-select,
+.projects-mode #newTaskBtn,
+.tasks-mode .project-panel,
+.tasks-mode .project-overview,
+.tasks-mode #newProjectBtn {
+  display: none;
+}
+
 .panel-header {
   display: flex;
   justify-content: space-between;
@@ -1338,6 +1357,11 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 @media (max-width: 1320px) {
   .workspace-layout {
     grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  }
+
+  .projects-mode .workspace-layout,
+  .tasks-mode .workspace-layout {
+    grid-template-columns: 1fr;
   }
 
   .task-preview-panel {

@@ -31,11 +31,11 @@
           <button class="nav-item active" data-nav-tab="dashboard" type="button" title="Dashboard">
             <span class="nav-icon">▦</span><span class="nav-label">Dashboard</span>
           </button>
-          <button class="nav-item" data-nav-tab="kanban" type="button" title="Công việc">
-            <span class="nav-icon">▤</span><span class="nav-label">Công việc</span>
-          </button>
-          <button class="nav-item" data-nav-tab="projects" type="button" title="Dự án">
+          <button class="nav-item" data-nav-tab="kanban" data-nav-item="projects" type="button" title="Dự án">
             <span class="nav-icon">▱</span><span class="nav-label">Dự án</span>
+          </button>
+          <button class="nav-item" data-nav-tab="kanban" data-nav-item="tasks" type="button" title="Công việc">
+            <span class="nav-icon">▤</span><span class="nav-label">Công việc</span>
           </button>
           <button class="nav-item" data-nav-tab="agents" type="button" title="Agents AI">
             <span class="nav-icon">◉</span><span class="nav-label">Agents AI</span>
@@ -95,7 +95,7 @@
               <article class="dashboard-card">
                 <div class="card-heading">
                   <h2>Nhiệm vụ trọng tâm</h2>
-                  <button class="text-button" data-nav-tab="kanban" type="button">Xem Kanban</button>
+                  <button class="text-button" data-nav-tab="kanban" data-nav-item="projects" type="button">Xem Kanban</button>
                 </div>
                 <div id="focusedTasks" class="focused-list"></div>
               </article>
@@ -149,8 +149,8 @@
             <aside class="panel project-panel">
               <div class="panel-header">
                 <div>
-                  <span class="panel-kicker">Workspace</span>
-                  <h2>Projects</h2>
+                  <span class="panel-kicker">Dự án</span>
+                  <h2>Danh sách dự án</h2>
                 </div>
               </div>
               <div id="projectList" class="project-list"></div>
@@ -181,7 +181,7 @@
             <aside class="panel task-preview-panel">
               <div class="panel-header">
                 <div>
-                  <span class="panel-kicker">Task Preview</span>
+                  <span class="panel-kicker">Task Detail</span>
                   <h2 id="previewTitle">No task selected</h2>
                 </div>
                 <button id="previewDeleteTaskBtn" class="icon-danger-button" type="button" aria-label="Delete task" title="Delete task" hidden>x</button>

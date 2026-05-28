@@ -6,3 +6,14 @@
 {"cmd":"add","has_area":true,"has_decision":true,"has_tag":true,"task_slug":"move-project-delete-to-workspace","ts":"2026-05-28T01:18:20.244409236+07:00"}
 {"area":"public/styles.css","cmd":"brief","result_count":1,"tag":null,"task":null,"ts":"2026-05-28T01:21:40.239996641+07:00"}
 {"cmd":"add","has_area":true,"has_decision":true,"has_tag":true,"task_slug":"fix-project-select-dark-mode-color","ts":"2026-05-28T01:22:00.945874142+07:00"}
+{"area":"tmp","cmd":"brief","result_count":0,"tag":null,"task":null,"ts":"2026-05-28T12:49:46.628845821+07:00"}
+{"area":"tmp","cmd":"brief","result_count":0,"tag":null,"task":null,"ts":"2026-05-28T12:51:23.393515451+07:00"}
+{"area":"public","cmd":"brief","result_count":2,"tag":null,"task":null,"ts":"2026-05-28T12:55:42.821430731+07:00"}
+{"area":"public","cmd":"brief","result_count":2,"tag":null,"task":null,"ts":"2026-05-28T12:57:22.878936987+07:00"}
+{"cmd":"add","has_area":true,"has_decision":true,"has_tag":true,"task_slug":"Make Projects the primary task-management sidebar entry","ts":"2026-05-28T13:00:58.128781634+07:00"}
+{"area":"public","cmd":"brief","result_count":3,"tag":null,"task":null,"ts":"2026-05-28T13:14:43.096241290+07:00"}
+{"cmd":"add","has_area":true,"has_decision":true,"has_tag":true,"task_slug":"Separate Projects and Tasks kanban layouts","ts":"2026-05-28T13:17:44.651981583+07:00"}
+{"area":"public","cmd":"brief","result_count":4,"tag":null,"task":null,"ts":"2026-05-28T13:20:47.128271473+07:00"}
+{"cmd":"add","has_area":true,"has_decision":true,"has_tag":true,"task_slug":"Move project panel to Tasks screen","ts":"2026-05-28T13:22:35.267228740+07:00"}
+{"area":"public","cmd":"brief","result_count":5,"tag":null,"task":null,"ts":"2026-05-28T13:23:57.333460881+07:00"}
+{"cmd":"add","has_area":true,"has_decision":true,"has_tag":true,"task_slug":"Restore project list to Projects screen","ts":"2026-05-28T13:25:21.167536366+07:00"}

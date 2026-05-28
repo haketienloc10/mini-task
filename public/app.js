@@ -7,6 +7,7 @@ const state = {
   selectedProjectId: null,
   selectedTaskId: null,
   activeTab: 'dashboard',
+  activeNavItem: 'dashboard',
   sidebarCollapsed: false,
   searchQuery: '',
   activeDetailTab: 'chat',
@@ -105,6 +106,8 @@ function bindEvents() {
   document.querySelectorAll('[data-nav-tab]').forEach((button) => {
     button.addEventListener('click', () => {
       state.activeTab = button.dataset.navTab;
+      state.activeNavItem = navItemForButton(button);
+      ensureSelectedTask();
       if (isTaskDetailRoute()) window.location.hash = '';
       render();
     });
@@ -115,6 +118,7 @@ function bindEvents() {
   });
   refs.backToBoardBtn.addEventListener('click', () => {
     state.activeTab = 'kanban';
+    ensureKanbanNavItem();
     window.location.hash = '';
   });
   refs.detailDeleteTaskBtn.addEventListener('click', deleteSelectedTask);
@@ -189,6 +193,7 @@ function bindEvents() {
     if (!button) return;
     state.selectedProjectId = button.dataset.dashboardProjectId;
     state.activeTab = 'kanban';
+    state.activeNavItem = 'projects';
     const tasks = selectedProjectTasks();
     state.selectedTaskId = tasks[0]?.id ?? null;
     loadSubagents(state.selectedProjectId).then(render);
@@ -289,24 +294,35 @@ function renderTaskData() {
   renderChat();
 }
 
+function navItemForButton(button) {
+  return button.dataset.navItem ?? (button.dataset.navTab === 'kanban' ? 'projects' : button.dataset.navTab);
+}
+
+function ensureKanbanNavItem() {
+  if (!['projects', 'tasks'].includes(state.activeNavItem)) {
+    state.activeNavItem = 'projects';
+  }
+}
+
 function renderShell() {
   refs.appSidebar.classList.toggle('collapsed', state.sidebarCollapsed);
   refs.sidebarToggle.querySelector('.collapse-icon').textContent = state.sidebarCollapsed ? '›' : '‹';
   refs.sidebarToggle.title = state.sidebarCollapsed ? 'Mở rộng sidebar' : 'Thu gọn sidebar';
   refs.sidebarToggle.setAttribute('aria-label', refs.sidebarToggle.title);
 
-  document.querySelectorAll('[data-nav-tab]').forEach((button) => {
-    button.classList.toggle('active', button.dataset.navTab === state.activeTab);
+  document.querySelectorAll('.nav-item[data-nav-tab]').forEach((button) => {
+    button.classList.toggle('active', navItemForButton(button) === state.activeNavItem);
   });
 
   const titles = {
     dashboard: ['Dashboard Quản Lý', 'Theo dõi dự án, công việc và agent từ dữ liệu thật của workspace.'],
-    kanban: ['Task Management', 'Quản lý lifecycle hiện tại: Assigned, Running, Done, Failed.'],
-    projects: ['Dự án', 'Placeholder cho quản trị dự án nâng cao.'],
+    projects: ['Dự án', 'Quản lý danh sách dự án, sức khỏe project và board công việc liên quan.'],
+    tasks: ['Công việc', 'Quản lý lifecycle hiện tại: Assigned, Running, Done, Failed.'],
     agents: ['Agents AI', 'Placeholder cho quản trị agent và năng lực AI.'],
     settings: ['Cài đặt', 'Placeholder cho cấu hình workspace.']
   };
-  const [title, subtitle] = titles[state.activeTab] ?? titles.dashboard;
+  const titleKey = state.activeTab === 'kanban' ? state.activeNavItem : state.activeTab;
+  const [title, subtitle] = titles[titleKey] ?? titles.dashboard;
   refs.pageTitle.textContent = title;
   refs.pageSubtitle.textContent = subtitle;
 }
@@ -392,9 +408,11 @@ function removeTask(taskId) {
 
 function renderRoute() {
   const isDetail = isTaskDetailRoute() && selectedTask();
+  refs.mainView.classList.toggle('projects-mode', state.activeTab === 'kanban' && state.activeNavItem === 'projects');
+  refs.mainView.classList.toggle('tasks-mode', state.activeTab === 'kanban' && state.activeNavItem === 'tasks');
   refs.dashboardView.hidden = isDetail || state.activeTab !== 'dashboard';
   refs.mainView.hidden = isDetail || state.activeTab !== 'kanban';
-  refs.placeholderView.hidden = isDetail || !['projects', 'agents', 'settings'].includes(state.activeTab);
+  refs.placeholderView.hidden = isDetail || !['agents', 'settings'].includes(state.activeTab);
   refs.taskDetailView.hidden = !isDetail;
   if (isDetail) {
     refs.pageTitle.textContent = 'Task Detail';
@@ -560,6 +578,14 @@ function renderProjects() {
 }
 
 function renderProjectOverview() {
+  if (state.activeTab === 'kanban' && state.activeNavItem === 'tasks') {
+    const activeTasks = state.tasks.filter((task) => task.status === 'Assigned' || task.status === 'Running').length;
+    refs.activeProjectName.textContent = 'Tất cả công việc';
+    refs.activeProjectMeta.textContent = `${state.tasks.length} tasks · ${activeTasks} active`;
+    refs.projectOverview.innerHTML = '';
+    return;
+  }
+
   const project = selectedProject();
   const tasks = selectedProjectTasks();
 
@@ -602,7 +628,7 @@ function renderTaskBoard() {
   refs.needsInputFilterBtn.classList.toggle('active', state.showNeedsInputOnly);
   refs.needsInputFilterBtn.setAttribute('aria-pressed', String(state.showNeedsInputOnly));
 
-  const tasks = selectedProjectTasks()
+  const tasks = boardTasks()
     .filter((task) => !state.showNeedsInputOnly || task.needsInput?.active)
     .filter(matchesSearch)
     .toSorted((a, b) => {
@@ -628,6 +654,7 @@ function renderTaskBoard() {
     button.addEventListener('click', () => {
       state.selectedTaskId = button.dataset.taskId;
       state.activeTab = 'kanban';
+      ensureKanbanNavItem();
       renderTaskBoard();
       renderTaskPreview();
       renderAgents();
@@ -1297,6 +1324,12 @@ function selectedProjectTasks() {
   return tasksForProject(state.selectedProjectId);
 }
 
+function boardTasks() {
+  return state.activeTab === 'kanban' && state.activeNavItem === 'tasks'
+    ? state.tasks
+    : selectedProjectTasks();
+}
+
 function tasksForProject(projectId) {
   return state.tasks.filter((task) => task.projectId === projectId);
 }
@@ -1348,11 +1381,11 @@ function statusInitial(status) {
 }
 
 function ensureSelectedTask() {
-  const projectTasks = selectedProjectTasks();
-  if (!isTaskDetailRoute() && projectTasks.length && !projectTasks.some((task) => task.id === state.selectedTaskId)) {
-    state.selectedTaskId = projectTasks[0].id;
+  const tasks = boardTasks();
+  if (!isTaskDetailRoute() && tasks.length && !tasks.some((task) => task.id === state.selectedTaskId)) {
+    state.selectedTaskId = tasks[0].id;
   }
-  if (!projectTasks.length) {
+  if (!tasks.length) {
     state.selectedTaskId = null;
   }
 }
