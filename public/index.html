@@ -3,175 +3,236 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Codex Task Dispatch - Project Command Center</title>
+    <title>Codex Task Dispatch - Nexus Ops</title>
     <meta name="description" content="Workspace quản lý project, task và agent cho các phiên Codex CLI local.">
-    <meta name="theme-color" content="#101317" id="meta-theme-color">
+    <meta name="theme-color" content="#f8fafc" id="meta-theme-color">
     <link rel="stylesheet" href="/styles.css">
     <script>
       (function() {
-        const savedTheme = localStorage.getItem('theme') || 'dark';
+        const savedTheme = localStorage.getItem('theme') || 'light';
         document.documentElement.setAttribute('data-theme', savedTheme);
-        const themeColor = savedTheme === 'dark' ? '#101317' : '#f5f7fa';
+        const themeColor = savedTheme === 'dark' ? '#0f172a' : '#f8fafc';
         document.querySelector('meta[name="theme-color"]')?.setAttribute('content', themeColor);
       })();
     </script>
   </head>
   <body>
     <main class="app-shell">
-      <header class="topbar">
-        <div class="brand-block">
-          <span class="eyebrow">Local Codex Operations</span>
-          <h1>Project Command Center</h1>
-          <p>Quản lý project, task và agent trong cùng một workspace điều phối.</p>
+      <aside id="appSidebar" class="app-sidebar">
+        <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="Thu gọn sidebar" title="Thu gọn sidebar">
+          <span class="collapse-icon">‹</span>
+        </button>
+        <div class="sidebar-brand">
+          <span class="brand-mark">P</span>
+          <span class="brand-name">NEXUS OPS</span>
         </div>
-        <div class="topbar-actions">
-          <button id="themeToggle" class="secondary-button" type="button" aria-label="Chuyển chế độ màu">
-            <span class="theme-text">Dark</span>
+        <nav class="sidebar-nav" aria-label="Điều hướng chính">
+          <span class="nav-section">Tổng quan</span>
+          <button class="nav-item active" data-nav-tab="dashboard" type="button" title="Dashboard">
+            <span class="nav-icon">▦</span><span class="nav-label">Dashboard</span>
           </button>
-          <button id="refreshButton" class="primary-button" type="button">Refresh</button>
+          <button class="nav-item" data-nav-tab="kanban" type="button" title="Công việc">
+            <span class="nav-icon">▤</span><span class="nav-label">Công việc</span>
+          </button>
+          <button class="nav-item" data-nav-tab="projects" type="button" title="Dự án">
+            <span class="nav-icon">▱</span><span class="nav-label">Dự án</span>
+          </button>
+          <button class="nav-item" data-nav-tab="agents" type="button" title="Agents AI">
+            <span class="nav-icon">◉</span><span class="nav-label">Agents AI</span>
+          </button>
+        </nav>
+        <div class="sidebar-footer">
+          <button class="nav-item" data-nav-tab="settings" type="button" title="Cài đặt">
+            <span class="nav-icon">⚙</span><span class="nav-label">Cài đặt</span>
+          </button>
         </div>
-      </header>
+      </aside>
 
-      <section class="metrics-grid" aria-label="Workspace summary">
-        <article class="metric-card">
-          <span>Projects</span>
-          <strong id="metricProjects">0</strong>
-        </article>
-        <article class="metric-card">
-          <span>Active Tasks</span>
-          <strong id="metricActiveTasks">0</strong>
-        </article>
-        <article class="metric-card">
-          <span>Running Agents</span>
-          <strong id="metricRunningAgents">0</strong>
-        </article>
-        <article class="metric-card">
-          <span>Done</span>
-          <strong id="metricDoneTasks">0</strong>
-        </article>
-      </section>
-
-      <section id="mainView" class="workspace-layout">
-        <aside class="panel project-panel">
-          <div class="panel-header">
-            <div>
-              <span class="panel-kicker">Workspace</span>
-              <h2>Projects</h2>
-            </div>
-            <button id="newProjectBtn" class="compact-button" type="button">New</button>
+      <section class="app-main">
+        <header class="app-header">
+          <div>
+            <h1 id="pageTitle">Dashboard Quản Lý</h1>
+            <p id="pageSubtitle">Theo dõi dự án, công việc và agent từ dữ liệu thật của workspace.</p>
           </div>
-          <div id="projectList" class="project-list"></div>
-        </aside>
+          <div class="header-tools">
+            <label class="search-field">
+              <span>⌕</span>
+              <input id="globalSearch" type="search" placeholder="Tìm task, agent, project...">
+            </label>
+            <button id="themeToggle" class="icon-button" type="button" aria-label="Chuyển chế độ màu" title="Chuyển chế độ màu">
+              <span class="theme-text">Light</span>
+            </button>
+            <button id="refreshButton" class="primary-button" type="button">Refresh</button>
+          </div>
+        </header>
 
-        <section class="panel board-panel">
-          <div class="panel-header board-header">
+        <section id="dashboardView" class="view-shell">
+          <section class="metrics-grid" aria-label="Workspace summary">
+            <article class="metric-card">
+              <span>Dự án đang chạy</span>
+              <strong id="metricProjects">0</strong>
+              <small id="metricProjectHint">0 active</small>
+            </article>
+            <article class="metric-card">
+              <span>Công việc mở</span>
+              <strong id="metricActiveTasks">0</strong>
+              <small id="metricNeedsInputHint">0 needs input</small>
+            </article>
+            <article class="metric-card">
+              <span>Agents sẵn sàng</span>
+              <strong id="metricRunningAgents">0</strong>
+              <small id="metricAgentHint">0 running</small>
+            </article>
+            <article class="metric-card">
+              <span>Tiến độ trung bình</span>
+              <strong id="metricDoneTasks">0%</strong>
+              <small id="metricDoneHint">0 done</small>
+            </article>
+          </section>
+
+          <section class="dashboard-grid">
+            <div class="dashboard-main">
+              <article class="dashboard-card">
+                <div class="card-heading">
+                  <h2>Nhiệm vụ trọng tâm</h2>
+                  <button class="text-button" data-nav-tab="kanban" type="button">Xem Kanban</button>
+                </div>
+                <div id="focusedTasks" class="focused-list"></div>
+              </article>
+              <article class="dashboard-card">
+                <div class="card-heading">
+                  <h2>Activity Timeline</h2>
+                  <span class="soft-label">7 ngày gần nhất</span>
+                </div>
+                <div id="activityTimeline" class="activity-chart"></div>
+              </article>
+            </div>
+            <aside class="dashboard-side">
+              <article class="dashboard-card">
+                <div class="card-heading">
+                  <h2>Project Health</h2>
+                  <span id="projectHealthCount" class="count-pill">0 active</span>
+                </div>
+                <div id="projectHealth" class="health-list"></div>
+              </article>
+              <article class="dashboard-card">
+                <div class="card-heading">
+                  <h2>Hoạt động mới nhất</h2>
+                  <span class="soft-label">Live data</span>
+                </div>
+                <div id="recentActivity" class="recent-list"></div>
+              </article>
+            </aside>
+          </section>
+        </section>
+
+        <section id="mainView" class="view-shell" hidden>
+          <div class="kanban-toolbar">
             <div>
-              <span class="panel-kicker">Selected Project</span>
               <h2 id="activeProjectName">No project selected</h2>
               <p id="activeProjectMeta" class="panel-subtitle"></p>
             </div>
             <div class="header-actions">
+              <button id="newProjectBtn" class="secondary-button" type="button">New Project</button>
               <button id="needsInputFilterBtn" class="secondary-button" type="button" aria-pressed="false">Needs Input</button>
+              <select class="filter-select" disabled title="Backend chưa có priority">
+                <option>Mức độ ưu tiên: Tất cả</option>
+              </select>
+              <select class="filter-select" disabled title="Backend chưa có due date">
+                <option>Thời hạn: Tất cả</option>
+              </select>
               <button id="newTaskBtn" class="primary-button" type="button">New Task</button>
             </div>
           </div>
 
-          <div id="projectOverview" class="project-overview"></div>
+          <section class="workspace-layout">
+            <aside class="panel project-panel">
+              <div class="panel-header">
+                <div>
+                  <span class="panel-kicker">Workspace</span>
+                  <h2>Projects</h2>
+                </div>
+              </div>
+              <div id="projectList" class="project-list"></div>
+            </aside>
 
-          <div class="task-board" aria-label="Task board">
-            <section class="task-column" data-status-column="Assigned">
-              <div class="column-header">
-                <h3>Assigned</h3>
-                <span id="countAssigned">0</span>
+            <section class="panel board-panel">
+              <div id="projectOverview" class="project-overview"></div>
+              <div class="task-board" aria-label="Task board">
+                <section class="task-column" data-status-column="Assigned">
+                  <div class="column-header"><h3><span></span>Assigned</h3><strong id="countAssigned">0</strong></div>
+                  <div id="tasksAssigned" class="column-tasks"></div>
+                </section>
+                <section class="task-column" data-status-column="Running">
+                  <div class="column-header"><h3><span></span>Running</h3><strong id="countRunning">0</strong></div>
+                  <div id="tasksRunning" class="column-tasks"></div>
+                </section>
+                <section class="task-column" data-status-column="Done">
+                  <div class="column-header"><h3><span></span>Done</h3><strong id="countDone">0</strong></div>
+                  <div id="tasksDone" class="column-tasks"></div>
+                </section>
+                <section class="task-column" data-status-column="Failed">
+                  <div class="column-header"><h3><span></span>Failed</h3><strong id="countFailed">0</strong></div>
+                  <div id="tasksFailed" class="column-tasks"></div>
+                </section>
               </div>
-              <div id="tasksAssigned" class="column-tasks"></div>
             </section>
-            <section class="task-column" data-status-column="Running">
-              <div class="column-header">
-                <h3>Running</h3>
-                <span id="countRunning">0</span>
+
+            <aside class="panel task-preview-panel">
+              <div class="panel-header">
+                <div>
+                  <span class="panel-kicker">Task Preview</span>
+                  <h2 id="previewTitle">No task selected</h2>
+                </div>
+                <button id="previewDeleteTaskBtn" class="icon-danger-button" type="button" aria-label="Delete task" title="Delete task" hidden>x</button>
               </div>
-              <div id="tasksRunning" class="column-tasks"></div>
-            </section>
-            <section class="task-column" data-status-column="Done">
-              <div class="column-header">
-                <h3>Done</h3>
-                <span id="countDone">0</span>
-              </div>
-              <div id="tasksDone" class="column-tasks"></div>
-            </section>
-            <section class="task-column" data-status-column="Failed">
-              <div class="column-header">
-                <h3>Failed</h3>
-                <span id="countFailed">0</span>
-              </div>
-              <div id="tasksFailed" class="column-tasks"></div>
-            </section>
-          </div>
+              <div id="taskPreview" class="task-preview empty">Select a task to view details.</div>
+            </aside>
+          </section>
         </section>
 
-        <aside class="panel task-preview-panel">
-          <div class="panel-header">
-            <div>
-              <span class="panel-kicker">Task Preview</span>
-              <h2 id="previewTitle">No task selected</h2>
+        <section id="placeholderView" class="placeholder-view" hidden>
+          <div class="placeholder-icon">▦</div>
+          <h2 id="placeholderTitle">Đang chuẩn bị</h2>
+          <p id="placeholderText">Section này hiện là placeholder vì backend chưa có API tương ứng.</p>
+          <button class="primary-button" data-nav-tab="dashboard" type="button">Return to Dashboard</button>
+        </section>
+
+        <section id="taskDetailView" class="task-detail-view" hidden>
+          <div class="detail-toolbar">
+            <button id="backToBoardBtn" class="secondary-button" type="button" aria-label="Quay về Kanban">← Kanban</button>
+            <div class="detail-title-block">
+              <span class="panel-kicker">Task Detail</span>
+              <h2 id="detailTitle">Task Detail</h2>
             </div>
-            <button id="previewDeleteTaskBtn" class="icon-danger-button" type="button" aria-label="Delete task" title="Delete task" hidden>
-              <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
-                <path d="M3 6h18"></path>
-                <path d="M8 6V4h8v2"></path>
-                <path d="M19 6l-1 14H6L5 6"></path>
-                <path d="M10 11v5"></path>
-                <path d="M14 11v5"></path>
-              </svg>
-            </button>
+            <button id="detailDeleteTaskBtn" class="icon-danger-button detail-delete-button" type="button" aria-label="Delete task" title="Delete task" hidden>x</button>
           </div>
-          <div id="taskPreview" class="task-preview empty">Select a task to view details.</div>
-        </aside>
-      </section>
 
-      <section id="taskDetailView" class="task-detail-view" hidden>
-        <div class="detail-toolbar">
-          <button id="backToBoardBtn" class="secondary-button" type="button" aria-label="Quay về màn hình chính">← Màn hình chính</button>
-          <div class="detail-title-block">
-            <span class="panel-kicker">Task Detail</span>
-            <h2 id="detailTitle">Task Detail</h2>
-          </div>
-          <button id="detailDeleteTaskBtn" class="icon-danger-button detail-delete-button" type="button" aria-label="Delete task" title="Delete task" hidden>
-            <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
-              <path d="M3 6h18"></path>
-              <path d="M8 6V4h8v2"></path>
-              <path d="M19 6l-1 14H6L5 6"></path>
-              <path d="M10 11v5"></path>
-              <path d="M14 11v5"></path>
-            </svg>
-          </button>
-        </div>
-
-        <section class="detail-layout">
-          <aside class="panel agent-panel">
-            <div class="panel-header">
-              <div>
-                <span class="panel-kicker">Agent Menu</span>
-                <h2>Agents</h2>
+          <section class="detail-layout">
+            <aside class="panel agent-panel">
+              <div class="panel-header">
+                <div>
+                  <span class="panel-kicker">Agent Menu</span>
+                  <h2>Agents</h2>
+                </div>
               </div>
-            </div>
-            <div id="agentList" class="agent-list"></div>
-          </aside>
+              <div id="agentList" class="agent-list"></div>
+            </aside>
 
-          <section class="panel detail-panel">
-            <div id="taskOverview" class="task-overview"></div>
-            <div class="detail-tabs" role="tablist" aria-label="Task detail sections">
-              <button class="detail-tab active" data-detail-tab="chat" type="button">Chat</button>
-              <button class="detail-tab" data-detail-tab="terminal" type="button">Terminal</button>
-              <button class="detail-tab" data-detail-tab="overview" type="button">Overview</button>
-              <button class="detail-tab" data-detail-tab="activity" type="button">Activity</button>
-            </div>
-            <div id="chatArea" class="chat-area empty">Select a task to start chatting.</div>
-            <div id="chatInputArea" class="chat-input-area" hidden>
-              <textarea id="chatInput" placeholder="Nhập tin nhắn để gửi subagent..." rows="2"></textarea>
-              <button id="sendChatBtn" class="primary-button" type="button">Send</button>
-            </div>
+            <section class="panel detail-panel">
+              <div id="taskOverview" class="task-overview"></div>
+              <div class="detail-tabs" role="tablist" aria-label="Task detail sections">
+                <button class="detail-tab active" data-detail-tab="chat" type="button">Chat</button>
+                <button class="detail-tab" data-detail-tab="terminal" type="button">Terminal</button>
+                <button class="detail-tab" data-detail-tab="overview" type="button">Overview</button>
+                <button class="detail-tab" data-detail-tab="activity" type="button">Activity</button>
+              </div>
+              <div id="chatArea" class="chat-area empty">Select a task to start chatting.</div>
+              <div id="chatInputArea" class="chat-input-area" hidden>
+                <textarea id="chatInput" placeholder="Nhập tin nhắn để gửi subagent..." rows="2"></textarea>
+                <button id="sendChatBtn" class="primary-button" type="button">Send</button>
+              </div>
+            </section>
           </section>
         </section>
       </section>
@@ -182,18 +243,9 @@
         <button class="close-modal" id="closeProjectModal" type="button" aria-label="Close">x</button>
         <form id="projectForm">
           <h2>Create Project</h2>
-          <label>
-            Project Name
-            <input name="name" required maxlength="100">
-          </label>
-          <label>
-            Description
-            <textarea name="description" rows="3"></textarea>
-          </label>
-          <label>
-            Workspace path
-            <input name="workspacePath" required placeholder="/home/locdt/mini-task">
-          </label>
+          <label>Project Name <input name="name" required maxlength="100"></label>
+          <label>Description <textarea name="description" rows="3"></textarea></label>
+          <label>Workspace path <input name="workspacePath" required placeholder="/home/locdt/mini-task"></label>
           <button class="primary-button" type="submit">Create</button>
           <p id="projectFormMessage" class="message" role="status"></p>
         </form>
@@ -205,26 +257,11 @@
         <button class="close-modal" id="closeTaskModal" type="button" aria-label="Close">x</button>
         <form id="taskForm">
           <h2>Create Task</h2>
-          <label>
-            Project
-            <select name="projectId" id="taskProjectSelect" required></select>
-          </label>
-          <label>
-            Title
-            <input name="title" required maxlength="120">
-          </label>
-          <label>
-            Description
-            <textarea name="description" required rows="4"></textarea>
-          </label>
-          <label>
-            Agent
-            <select name="subagent" id="taskSubagentSelect" required></select>
-          </label>
-          <label>
-            Notes
-            <textarea name="notes" rows="2"></textarea>
-          </label>
+          <label>Project <select name="projectId" id="taskProjectSelect" required></select></label>
+          <label>Title <input name="title" required maxlength="120"></label>
+          <label>Description <textarea name="description" required rows="4"></textarea></label>
+          <label>Agent <select name="subagent" id="taskSubagentSelect" required></select></label>
+          <label>Notes <textarea name="notes" rows="2"></textarea></label>
           <button class="primary-button" type="submit">Create</button>
           <p id="formMessage" class="message" role="status"></p>
         </form>

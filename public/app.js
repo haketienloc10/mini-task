@@ -6,6 +6,9 @@ const state = {
   subagents: [],
   selectedProjectId: null,
   selectedTaskId: null,
+  activeTab: 'dashboard',
+  sidebarCollapsed: false,
+  searchQuery: '',
   activeDetailTab: 'chat',
   terminalViewMode: 'pretty',
   showNeedsInputOnly: false,
@@ -19,12 +22,30 @@ const state = {
 let isLoadingData = false;
 
 const refs = {
+  appSidebar: document.querySelector('#appSidebar'),
+  sidebarToggle: document.querySelector('#sidebarToggle'),
+  pageTitle: document.querySelector('#pageTitle'),
+  pageSubtitle: document.querySelector('#pageSubtitle'),
+  dashboardView: document.querySelector('#dashboardView'),
   mainView: document.querySelector('#mainView'),
+  placeholderView: document.querySelector('#placeholderView'),
+  placeholderTitle: document.querySelector('#placeholderTitle'),
+  placeholderText: document.querySelector('#placeholderText'),
   taskDetailView: document.querySelector('#taskDetailView'),
+  globalSearch: document.querySelector('#globalSearch'),
   metricProjects: document.querySelector('#metricProjects'),
   metricActiveTasks: document.querySelector('#metricActiveTasks'),
   metricRunningAgents: document.querySelector('#metricRunningAgents'),
   metricDoneTasks: document.querySelector('#metricDoneTasks'),
+  metricProjectHint: document.querySelector('#metricProjectHint'),
+  metricNeedsInputHint: document.querySelector('#metricNeedsInputHint'),
+  metricAgentHint: document.querySelector('#metricAgentHint'),
+  metricDoneHint: document.querySelector('#metricDoneHint'),
+  focusedTasks: document.querySelector('#focusedTasks'),
+  activityTimeline: document.querySelector('#activityTimeline'),
+  projectHealthCount: document.querySelector('#projectHealthCount'),
+  projectHealth: document.querySelector('#projectHealth'),
+  recentActivity: document.querySelector('#recentActivity'),
   projectList: document.querySelector('#projectList'),
   activeProjectName: document.querySelector('#activeProjectName'),
   activeProjectMeta: document.querySelector('#activeProjectMeta'),
@@ -72,11 +93,28 @@ async function init() {
 function bindEvents() {
   refs.refreshButton.addEventListener('click', loadData);
   refs.themeToggle.addEventListener('click', toggleTheme);
+  refs.sidebarToggle.addEventListener('click', () => {
+    state.sidebarCollapsed = !state.sidebarCollapsed;
+    renderShell();
+  });
+  refs.globalSearch.addEventListener('input', () => {
+    state.searchQuery = refs.globalSearch.value.trim().toLowerCase();
+    renderTaskBoard();
+    renderDashboard();
+  });
+  document.querySelectorAll('[data-nav-tab]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.activeTab = button.dataset.navTab;
+      if (isTaskDetailRoute()) window.location.hash = '';
+      render();
+    });
+  });
   refs.needsInputFilterBtn.addEventListener('click', () => {
     state.showNeedsInputOnly = !state.showNeedsInputOnly;
     renderTaskBoard();
   });
   refs.backToBoardBtn.addEventListener('click', () => {
+    state.activeTab = 'kanban';
     window.location.hash = '';
   });
   refs.detailDeleteTaskBtn.addEventListener('click', deleteSelectedTask);
@@ -140,6 +178,21 @@ function bindEvents() {
     renderChat();
   });
   refs.taskOverview.addEventListener('click', handleTaskActionClick);
+  refs.focusedTasks.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-dashboard-task-id]');
+    if (!button) return;
+    state.selectedTaskId = button.dataset.dashboardTaskId;
+    window.location.hash = `#/tasks/${button.dataset.dashboardTaskId}`;
+  });
+  refs.projectHealth.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-dashboard-project-id]');
+    if (!button) return;
+    state.selectedProjectId = button.dataset.dashboardProjectId;
+    state.activeTab = 'kanban';
+    const tasks = selectedProjectTasks();
+    state.selectedTaskId = tasks[0]?.id ?? null;
+    loadSubagents(state.selectedProjectId).then(render);
+  });
 }
 
 async function createProject(event) {
@@ -219,6 +272,7 @@ function renderSubagentOptions() {
 
 function render() {
   refs.newTaskBtn.disabled = !state.projects.length;
+  renderShell();
   renderRoute();
   renderTaskData();
   syncTerminalStream();
@@ -226,12 +280,35 @@ function render() {
 
 function renderTaskData() {
   renderMetrics();
+  renderDashboard();
   renderProjects();
   renderProjectOverview();
   renderTaskBoard();
   renderTaskPreview();
   renderAgents();
   renderChat();
+}
+
+function renderShell() {
+  refs.appSidebar.classList.toggle('collapsed', state.sidebarCollapsed);
+  refs.sidebarToggle.querySelector('.collapse-icon').textContent = state.sidebarCollapsed ? '›' : '‹';
+  refs.sidebarToggle.title = state.sidebarCollapsed ? 'Mở rộng sidebar' : 'Thu gọn sidebar';
+  refs.sidebarToggle.setAttribute('aria-label', refs.sidebarToggle.title);
+
+  document.querySelectorAll('[data-nav-tab]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.navTab === state.activeTab);
+  });
+
+  const titles = {
+    dashboard: ['Dashboard Quản Lý', 'Theo dõi dự án, công việc và agent từ dữ liệu thật của workspace.'],
+    kanban: ['Task Management', 'Quản lý lifecycle hiện tại: Assigned, Running, Done, Failed.'],
+    projects: ['Dự án', 'Placeholder cho quản trị dự án nâng cao.'],
+    agents: ['Agents AI', 'Placeholder cho quản trị agent và năng lực AI.'],
+    settings: ['Cài đặt', 'Placeholder cho cấu hình workspace.']
+  };
+  const [title, subtitle] = titles[state.activeTab] ?? titles.dashboard;
+  refs.pageTitle.textContent = title;
+  refs.pageSubtitle.textContent = subtitle;
 }
 
 function syncTaskStream() {
@@ -315,16 +392,120 @@ function removeTask(taskId) {
 
 function renderRoute() {
   const isDetail = isTaskDetailRoute() && selectedTask();
-  refs.mainView.hidden = isDetail;
+  refs.dashboardView.hidden = isDetail || state.activeTab !== 'dashboard';
+  refs.mainView.hidden = isDetail || state.activeTab !== 'kanban';
+  refs.placeholderView.hidden = isDetail || !['projects', 'agents', 'settings'].includes(state.activeTab);
   refs.taskDetailView.hidden = !isDetail;
+  if (isDetail) {
+    refs.pageTitle.textContent = 'Task Detail';
+    refs.pageSubtitle.textContent = selectedTask()?.title ?? 'Task Detail';
+    return;
+  }
+  if (!refs.placeholderView.hidden) {
+    const copy = {
+      projects: ['Dự án', 'Quản trị dự án nâng cao sẽ dùng API riêng khi có backend tương ứng.'],
+      agents: ['Agents AI', 'Quản trị agent và năng lực AI sẽ được nối với API thật ở bước sau.'],
+      settings: ['Cài đặt', 'Cấu hình workspace chưa có backend, nên section này chỉ giữ vị trí UI.']
+    };
+    const [title, text] = copy[state.activeTab] ?? copy.projects;
+    refs.placeholderTitle.textContent = title;
+    refs.placeholderText.textContent = text;
+  }
 }
 
 function renderMetrics() {
   const activeTasks = state.tasks.filter((task) => task.status === 'Assigned' || task.status === 'Running').length;
+  const doneTasks = state.tasks.filter((task) => task.status === 'Done').length;
+  const progress = state.tasks.length ? Math.round((doneTasks / state.tasks.length) * 100) : 0;
   refs.metricProjects.textContent = state.projects.length;
   refs.metricActiveTasks.textContent = activeTasks;
-  refs.metricRunningAgents.textContent = state.tasks.filter((task) => task.status === 'Running').length;
-  refs.metricDoneTasks.textContent = state.tasks.filter((task) => task.status === 'Done').length;
+  refs.metricRunningAgents.textContent = state.subagents.length;
+  refs.metricDoneTasks.textContent = `${progress}%`;
+  refs.metricProjectHint.textContent = `${state.projects.length} active`;
+  refs.metricNeedsInputHint.textContent = `${state.tasks.filter((task) => task.needsInput?.active).length} needs input`;
+  refs.metricAgentHint.textContent = `${state.tasks.filter((task) => task.status === 'Running').length} running`;
+  refs.metricDoneHint.textContent = `${doneTasks} done`;
+}
+
+function renderDashboard() {
+  renderFocusedTasks();
+  renderActivityTimeline();
+  renderProjectHealth();
+  renderRecentActivity();
+}
+
+function renderFocusedTasks() {
+  const tasks = state.tasks
+    .filter(matchesSearch)
+    .toSorted((a, b) => {
+      const inputDelta = Number(Boolean(b.needsInput?.active)) - Number(Boolean(a.needsInput?.active));
+      if (inputDelta) return inputDelta;
+      const runningDelta = Number(b.status === 'Running') - Number(a.status === 'Running');
+      if (runningDelta) return runningDelta;
+      return new Date(b.updatedAt) - new Date(a.updatedAt);
+    })
+    .slice(0, 5);
+
+  refs.focusedTasks.innerHTML = tasks.length ? tasks.map((task) => `
+    <button class="focused-task" data-dashboard-task-id="${task.id}" type="button">
+      <span class="status-dot ${task.status}"></span>
+      <span>
+        <strong>${escapeHtml(task.title)}</strong>
+        <small>${escapeHtml(projectName(task.projectId))} · ${escapeHtml(agentLabel(task.subagent))}</small>
+      </span>
+      <span class="status ${task.status}">${escapeHtml(task.status)}</span>
+    </button>
+  `).join('') : '<p class="empty compact">No tasks matched.</p>';
+}
+
+function renderActivityTimeline() {
+  const days = lastSevenDays();
+  const maxValue = Math.max(1, ...days.map((day) => day.done + day.added));
+  refs.activityTimeline.innerHTML = days.map((day) => {
+    const doneHeight = Math.max(8, Math.round((day.done / maxValue) * 130));
+    const addedHeight = Math.max(8, Math.round((day.added / maxValue) * 130));
+    return `
+      <div class="activity-day">
+        <div class="bar-stack" title="${day.done} done, ${day.added} new">
+          <span class="bar done" style="height:${doneHeight}px"></span>
+          <span class="bar added" style="height:${addedHeight}px"></span>
+        </div>
+        <strong>${escapeHtml(day.label)}</strong>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderProjectHealth() {
+  refs.projectHealthCount.textContent = `${state.projects.length} active`;
+  refs.projectHealth.innerHTML = state.projects.length ? state.projects.map((project) => {
+    const tasks = tasksForProject(project.id);
+    const done = tasks.filter((task) => task.status === 'Done').length;
+    const progress = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
+    return `
+      <button class="health-item" data-dashboard-project-id="${project.id}" type="button">
+        <span><strong>${escapeHtml(project.name)}</strong><small>${tasks.length} tasks</small></span>
+        <span class="health-value">${progress}%</span>
+        <span class="health-track"><span style="width:${progress}%"></span></span>
+      </button>
+    `;
+  }).join('') : '<p class="empty compact">No projects yet.</p>';
+}
+
+function renderRecentActivity() {
+  const tasks = state.tasks
+    .filter(matchesSearch)
+    .toSorted((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+    .slice(0, 6);
+  refs.recentActivity.innerHTML = tasks.length ? tasks.map((task) => `
+    <article class="recent-item">
+      <span class="activity-icon ${task.status}">${task.needsInput?.active ? '!' : statusInitial(task.status)}</span>
+      <span>
+        <strong>${escapeHtml(task.title)}</strong>
+        <small>${escapeHtml(task.status)} · ${escapeHtml(formatDate(task.updatedAt))}</small>
+      </span>
+    </article>
+  `).join('') : '<p class="empty compact">No recent activity.</p>';
 }
 
 function renderProjects() {
@@ -423,6 +604,7 @@ function renderTaskBoard() {
 
   const tasks = selectedProjectTasks()
     .filter((task) => !state.showNeedsInputOnly || task.needsInput?.active)
+    .filter(matchesSearch)
     .toSorted((a, b) => {
       const inputDelta = Number(Boolean(b.needsInput?.active)) - Number(Boolean(a.needsInput?.active));
       if (inputDelta) return inputDelta;
@@ -445,6 +627,7 @@ function renderTaskBoard() {
   document.querySelectorAll('[data-task-id]').forEach((button) => {
     button.addEventListener('click', () => {
       state.selectedTaskId = button.dataset.taskId;
+      state.activeTab = 'kanban';
       renderTaskBoard();
       renderTaskPreview();
       renderAgents();
@@ -1118,6 +1301,52 @@ function tasksForProject(projectId) {
   return state.tasks.filter((task) => task.projectId === projectId);
 }
 
+function matchesSearch(task) {
+  if (!state.searchQuery) return true;
+  const haystack = [
+    task.title,
+    task.description,
+    task.notes,
+    task.status,
+    agentLabel(task.subagent),
+    projectName(task.projectId)
+  ].filter(Boolean).join(' ').toLowerCase();
+  return haystack.includes(state.searchQuery);
+}
+
+function projectName(projectId) {
+  return state.projects.find((project) => project.id === projectId)?.name ?? 'Unknown project';
+}
+
+function lastSevenDays() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() - (6 - index));
+    const key = date.toISOString().slice(0, 10);
+    const dayTasks = state.tasks.filter((task) => String(task.createdAt || '').slice(0, 10) === key);
+    const doneTasks = state.tasks.filter((task) => {
+      const finishedKey = String(task.finishedAt || task.updatedAt || '').slice(0, 10);
+      return task.status === 'Done' && finishedKey === key;
+    });
+    return {
+      label: date.toLocaleDateString(undefined, { weekday: 'short' }),
+      added: dayTasks.length,
+      done: doneTasks.length
+    };
+  });
+}
+
+function statusInitial(status) {
+  return {
+    Assigned: 'A',
+    Running: 'R',
+    Done: '✓',
+    Failed: '!'
+  }[status] ?? 'i';
+}
+
 function ensureSelectedTask() {
   const projectTasks = selectedProjectTasks();
   if (!isTaskDetailRoute() && projectTasks.length && !projectTasks.some((task) => task.id === state.selectedTaskId)) {
@@ -1160,7 +1389,7 @@ function closeModal(modal) {
 }
 
 function toggleTheme() {
-  const activeTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+  const activeTheme = document.documentElement.getAttribute('data-theme') || 'light';
   const newTheme = activeTheme === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', newTheme);
   localStorage.setItem('theme', newTheme);
@@ -1168,9 +1397,9 @@ function toggleTheme() {
 }
 
 function syncThemeToggle() {
-  const theme = document.documentElement.getAttribute('data-theme') || 'dark';
+  const theme = document.documentElement.getAttribute('data-theme') || 'light';
   refs.themeText.textContent = theme === 'dark' ? 'Dark' : 'Light';
-  refs.metaThemeColor?.setAttribute('content', theme === 'dark' ? '#101317' : '#f5f7fa');
+  refs.metaThemeColor?.setAttribute('content', theme === 'dark' ? '#0f172a' : '#f8fafc');
 }
 
 async function api(path, options = {}) {
