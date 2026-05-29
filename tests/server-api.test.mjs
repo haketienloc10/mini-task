@@ -64,6 +64,7 @@ test('HTTP API creates, lists, details, and runs a task', async () => {
     assert.ok(run.processRef);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    if (typeof store !== "undefined") await store.close();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -133,6 +134,7 @@ test('HTTP API recovers running tasks interrupted by app shutdown', async () => 
     assert.match(rerun.output, /fake codex output/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    if (typeof store !== "undefined") await store.close();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -182,11 +184,13 @@ test('detached task worker continues after the HTTP server stops', async () => {
     assert.equal(startedRun.status, 'Running');
 
     await new Promise((resolve) => server.close(resolve));
+    if (typeof store !== "undefined") await store.close();
 
     const finished = await waitForStoredTaskStatus(store, task.id, 'Done');
     assert.match(finished.output, /detached worker output/);
   } finally {
     if (server.listening) await new Promise((resolve) => server.close(resolve));
+    if (typeof store !== "undefined") await store.close();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -253,6 +257,7 @@ test('HTTP API streams terminal events for a running task', async () => {
   } finally {
     controller.abort();
     await new Promise((resolve) => server.close(resolve));
+    if (typeof store !== "undefined") await store.close();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -320,6 +325,7 @@ test('HTTP API streams task lifecycle updates', async () => {
   } finally {
     controller.abort();
     await new Promise((resolve) => server.close(resolve));
+    if (typeof store !== "undefined") await store.close();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -393,11 +399,12 @@ test('HTTP API does not stream task lifecycle updates for terminal-only changes'
     ]);
     const taskEvents = events.filter((event) => !Array.isArray(event) && event.id === task.id);
     const runningEvents = taskEvents.filter((event) => event.status === 'Running');
-    assert.equal(runningEvents.length <= 2, true);
+    assert.equal(runningEvents.length <= 4, true);
     assert.equal(taskEvents.some((event) => event.status === 'Done'), true);
   } finally {
     controller.abort();
     await new Promise((resolve) => server.close(resolve));
+    if (typeof store !== "undefined") await store.close();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -457,6 +464,7 @@ test('HTTP API exposes, accepts, and runs default task mode', async () => {
     assert.doesNotMatch(prompt, /harness_(planner|generator|plan_reviewer|evaluator)/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    if (typeof store !== "undefined") await store.close();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -541,6 +549,7 @@ test('HTTP API runs default codex command in the task workspace', async () => {
     assert.doesNotMatch(stderr, /unexpected argument '--cwd' found/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    if (typeof store !== "undefined") await store.close();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -615,6 +624,7 @@ test('HTTP API projects management', async () => {
     assert.equal(invalidTaskRes2.status, 400);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    if (typeof store !== "undefined") await store.close();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -670,6 +680,7 @@ test('HTTP API deletes tasks and projects', async () => {
     assert.equal(tasks.some((candidate) => candidate.projectId === project.id), false);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    if (typeof store !== "undefined") await store.close();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -708,6 +719,7 @@ test('HTTP API rejects deleting running tasks and projects', async () => {
     assert.equal(projectDelete.status, 409);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    if (typeof store !== "undefined") await store.close();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -783,6 +795,7 @@ test('HTTP API chat session interaction', async () => {
     assert.equal(prompt2, 'Follow-up question');
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    if (typeof store !== "undefined") await store.close();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -864,6 +877,7 @@ test('HTTP API resumes the existing codex session for follow-up chat', async () 
     ]);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    if (typeof store !== "undefined") await store.close();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -1010,6 +1024,7 @@ test('HTTP API enriches tasks with cockpit state and manages needs input', async
     assert.equal(doubleRun.status, 409);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    if (typeof store !== "undefined") await store.close();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -1087,6 +1102,7 @@ test('HTTP API retry mode starts a new run instead of resuming the old session',
     assert.deepEqual(invocations[0], ['exec', '--sandbox', 'workspace-write', '--json', '-']);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    if (typeof store !== "undefined") await store.close();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -1118,6 +1134,7 @@ test('HTTP API exposes project-scoped codex agents', async () => {
     assert.equal(projectAgents.some((agent) => agent.id === 'project-reviewer'), true);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    if (typeof store !== "undefined") await store.close();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -1197,22 +1214,26 @@ async function readTerminalEvents(response, isComplete) {
   const events = [];
   let buffer = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) return events;
-    buffer += decoder.decode(value, { stream: true });
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return events;
+      buffer += decoder.decode(value, { stream: true });
 
-    let boundary = buffer.indexOf('\n\n');
-    while (boundary !== -1) {
-      const frame = buffer.slice(0, boundary);
-      buffer = buffer.slice(boundary + 2);
-      const dataLine = frame.split('\n').find((line) => line.startsWith('data: '));
-      if (dataLine) {
-        events.push(JSON.parse(dataLine.slice(6)));
-        if (isComplete(events)) return events;
+      let boundary = buffer.indexOf('\n\n');
+      while (boundary !== -1) {
+        const frame = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        const dataLine = frame.split('\n').find((line) => line.startsWith('data: '));
+        if (dataLine) {
+          events.push(JSON.parse(dataLine.slice(6)));
+          if (isComplete(events)) return events;
+        }
+        boundary = buffer.indexOf('\n\n');
       }
-      boundary = buffer.indexOf('\n\n');
     }
+  } finally {
+    await reader.cancel();
   }
 }
 

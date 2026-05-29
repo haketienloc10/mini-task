@@ -20,3 +20,8 @@
 {"area":".","cmd":"brief","result_count":2,"tag":null,"task":null,"ts":"2026-05-28T16:42:29.136199544+07:00"}
 {"area":".","cmd":"brief","result_count":2,"tag":null,"task":null,"ts":"2026-05-29T09:16:12.611138749+07:00"}
 {"cmd":"add","has_area":true,"has_decision":true,"has_tag":false,"task_slug":"Phase 1 discuss-phase","ts":"2026-05-29T11:26:04.567630575+07:00"}
+{"area":"src","cmd":"brief","result_count":0,"tag":null,"task":null,"ts":"2026-05-29T12:16:49.225017167+07:00"}
+{"cmd":"add","has_area":true,"has_decision":true,"has_tag":false,"task_slug":"01-storage-migration-to-sqlite","ts":"2026-05-29T12:25:21.298249598+07:00"}
+{"area":"src","cmd":"brief","result_count":1,"tag":null,"task":null,"ts":"2026-05-29T12:26:54.144204249+07:00"}
+{"area":"src/taskStore.mjs","cmd":"brief","result_count":1,"tag":null,"task":null,"ts":"2026-05-29T12:31:14.758907745+07:00"}
+{"cmd":"add","has_area":true,"has_decision":false,"has_tag":false,"task_slug":"storage-migration-bugfix","ts":"2026-05-29T12:38:11.281695422+07:00"}

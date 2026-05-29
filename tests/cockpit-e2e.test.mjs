@@ -222,6 +222,7 @@ test('E2E Cockpit Workflow and Action Guards', async () => {
     assert.equal(failTask.actions.canRetry, true);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    if (typeof store !== "undefined") await store.close();
     await rm(root, { recursive: true, force: true });
   }
 });
