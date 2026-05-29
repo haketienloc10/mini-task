@@ -87,7 +87,7 @@ Trước khi đóng tác vụ, người thực hiện (Agent) **phải** hoàn t
 
 Thực thi lệnh:
 
-    ./bin/pnotes add continuity ...
+    ./bin/pnotes add continuity {YYYY-MM-DD}-{task-slug}.md
 
 **Yêu cầu bắt buộc:**
 
