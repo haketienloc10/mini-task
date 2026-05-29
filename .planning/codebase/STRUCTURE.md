@@ -4,7 +4,6 @@ The repository is structured to separate the backend logic, frontend assets, and
 
 ## Directory Tree
 
-- **`bin/`**: Contains executable CLI tools (e.g., `pnotes`).
 - **`public/`**: Frontend assets served statically by the backend.
   - `index.html`: Main HTML entry point.
   - `app.js`: Core frontend application logic, state handling, and SSE client.
