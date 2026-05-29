@@ -1,0 +1,8 @@
+{
+  "project": "Codex Task Dispatch",
+  "workflow": {
+    "auto_approve_planning": false,
+    "require_tests": true,
+    "require_code_review": false
+  }
+}
