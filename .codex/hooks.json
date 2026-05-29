@@ -1,0 +1,12 @@
+{
+  "SessionStart": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "\"/home/locdt/.nvm/versions/node/v22.17.1/bin/node\" \"/home/locdt/Notes/VSCode/mini-task/.codex/hooks/gsd-check-update.js\""
+        }
+      ]
+    }
+  ]
+}
