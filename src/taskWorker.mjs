@@ -9,6 +9,16 @@ if (!taskId || !dataDir) {
 }
 
 const store = new TaskStore({ dataDir });
+
+if (process.send) {
+  store.on('task-updated', task => process.send({ type: 'task-updated', data: task }));
+  store.on('terminal', data => process.send({ type: 'terminal', data }));
+  
+  process.on('disconnect', () => {
+    // Keep running even if the HTTP server parent disconnects
+  });
+}
+
 await store.init();
 
 const task = await store.getTask(taskId);
@@ -37,4 +47,6 @@ try {
     workerRef: null,
     workerHeartbeatAt: null
   });
+  await store.close();
+  process.exit(process.exitCode || 0);
 }

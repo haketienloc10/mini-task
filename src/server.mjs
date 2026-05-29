@@ -11,59 +11,36 @@ import { enrichTask, normalizeNeedsInput } from './taskCockpit.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, '..', 'public');
 const workerFile = path.resolve(__dirname, 'taskWorker.mjs');
-const SSE_POLL_INTERVAL_MS = 250;
 
 export function createServer({ store = new TaskStore(), runnerOptions = {} } = {}) {
   const terminalClients = new Map();
   const taskClients = new Set();
-  let pollTimer = null;
-  let pollChain = Promise.resolve();
-  const knownTaskSignatures = new Map();
+  
   let initPromise = null;
   const ensureStoreReady = async () => {
     initPromise ??= store.init().then(() => recoverInterruptedRunningTasks(store));
     return initPromise;
   };
+  
   const publishTaskEvent = (type, task) => {
     if (!task) return;
     for (const res of taskClients) {
       sendSseEvent(res, type, enrichTask(task));
     }
   };
-  const pollTaskChanges = async () => {
-    const tasks = await store.listTasks();
-    for (const task of tasks) {
-      const signature = taskUpdateSignature(task);
-      const previousSignature = knownTaskSignatures.get(task.id);
-      if (previousSignature && previousSignature !== signature) {
-        publishTaskEvent('task-updated', task);
-      }
-      knownTaskSignatures.set(task.id, signature);
 
-      const clients = terminalClients.get(task.id);
-      if (!clients) continue;
-      for (const event of task.terminalEvents || []) {
-        for (const [res, state] of clients) {
-          if (state.sentEventIds.has(event.id)) continue;
-          sendSseEvent(res, 'terminal', event, event.id);
-          state.sentEventIds.add(event.id);
-        }
-      }
+  store.on('task-created', task => publishTaskEvent('task-created', task));
+  store.on('task-updated', task => publishTaskEvent('task-updated', task));
+  store.on('task-deleted', task => publishTaskEvent('task-deleted', task));
+  store.on('terminal', ({ taskId, event }) => {
+    const clients = terminalClients.get(taskId);
+    if (!clients) return;
+    for (const [res, state] of clients) {
+      if (state.sentEventIds.has(event.id)) continue;
+      sendSseEvent(res, 'terminal', event, event.id);
+      state.sentEventIds.add(event.id);
     }
-  };
-  const startPolling = () => {
-    if (pollTimer) return;
-    pollTimer = setInterval(() => {
-      if (!taskClients.size && !terminalClients.size) return;
-      pollChain = pollChain.then(pollTaskChanges, pollTaskChanges).catch(() => {});
-    }, SSE_POLL_INTERVAL_MS);
-    pollTimer.unref?.();
-  };
-  const stopPollingIfIdle = () => {
-    if (!pollTimer || taskClients.size || terminalClients.size) return;
-    clearInterval(pollTimer);
-    pollTimer = null;
-  };
+  });
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -101,9 +78,7 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
         try {
           const deleted = await store.deleteProject(projectMatch[1]);
           if (!deleted) return sendJson(res, 404, { error: 'Project not found' });
-          for (const task of deleted.tasks) {
-            publishTaskEvent('task-deleted', task);
-          }
+          // Note: store.deleteProject already emits 'task-deleted' for all cascaded tasks.
           return sendJson(res, 200, deleted);
         } catch (error) {
           return sendJson(res, 409, { error: error.message });
@@ -124,10 +99,8 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
         sendSseEvent(res, 'task-snapshot', enrichTasks(await store.listTasks()));
 
         taskClients.add(res);
-        startPolling();
         req.on('close', () => {
           taskClients.delete(res);
-          stopPollingIfIdle();
         });
         return;
       }
@@ -138,7 +111,6 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
         if (validation) return sendJson(res, 400, { error: validation });
         try {
           const task = await store.createTask(body);
-          publishTaskEvent('task-created', task);
           return sendJson(res, 201, enrichTask(task));
         } catch (error) {
           return sendJson(res, 400, { error: error.message });
@@ -156,7 +128,6 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
         try {
           const task = await store.deleteTask(taskMatch[1]);
           if (!task) return sendJson(res, 404, { error: 'Task not found' });
-          publishTaskEvent('task-deleted', task);
           return sendJson(res, 200, enrichTask(task));
         } catch (error) {
           return sendJson(res, 409, { error: error.message });
@@ -183,13 +154,12 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
           sendSseEvent(res, 'terminal', event, event.id);
           clientState.sentEventIds.add(event.id);
         }
-        startPolling();
+        
         req.on('close', () => {
           const clients = terminalClients.get(taskId);
           if (!clients) return;
           clients.delete(res);
           if (!clients.size) terminalClients.delete(taskId);
-          stopPollingIfIdle();
         });
         return;
       }
@@ -223,17 +193,19 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
           error: '',
           tokenUsage: null
         });
-        knownTaskSignatures.set(startedTask.id, taskUpdateSignature(startedTask));
+        
         const workerRef = startTaskWorker({
           taskId: task.id,
           dataDir: store.dataDir,
-          runnerOptions: runOptions
+          runnerOptions: runOptions,
+          store
         });
+        
         const taskWithWorker = await store.updateTask(task.id, {
           workerRef: String(workerRef),
           workerHeartbeatAt: new Date().toISOString()
         });
-        publishTaskEvent('task-updated', startedTask);
+        
         return sendJson(res, 202, enrichTask(taskWithWorker));
       }
 
@@ -255,7 +227,6 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
               createdAt: new Date().toISOString()
             });
         const updatedTask = await store.updateTask(task.id, { needsInput });
-        publishTaskEvent('task-updated', updatedTask);
         return sendJson(res, 200, enrichTask(updatedTask));
       }
 
@@ -268,9 +239,7 @@ export function createServer({ store = new TaskStore(), runnerOptions = {} } = {
       return sendJson(res, 500, { error: error.message });
     }
   });
-  server.on('close', () => {
-    if (pollTimer) clearInterval(pollTimer);
-  });
+  
   return server;
 }
 
@@ -293,7 +262,7 @@ async function recoverInterruptedRunningTasks(store) {
   }
 }
 
-function startTaskWorker({ taskId, dataDir, runnerOptions }) {
+function startTaskWorker({ taskId, dataDir, runnerOptions, store }) {
   const payload = JSON.stringify({
     taskId,
     dataDir,
@@ -301,12 +270,19 @@ function startTaskWorker({ taskId, dataDir, runnerOptions }) {
   });
   const child = spawn(process.execPath, [workerFile], {
     detached: true,
-    stdio: 'ignore',
+    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
     env: {
       ...process.env,
       CODEX_TASK_WORKER_PAYLOAD: payload
     }
   });
+  
+  child.on('message', (msg) => {
+    if (msg.type && msg.data && store) {
+      store.emit(msg.type, msg.data);
+    }
+  });
+  
   child.unref();
   return child.pid;
 }
@@ -407,18 +383,6 @@ function processExists(pid) {
   } catch {
     return false;
   }
-}
-
-function taskUpdateSignature(task) {
-  const {
-    currentRunRef,
-    terminalEvents,
-    updatedAt,
-    workerHeartbeatAt,
-    workerRef,
-    ...taskState
-  } = task;
-  return JSON.stringify(taskState);
 }
 
 async function validateTaskInput(body, store, runnerOptions) {

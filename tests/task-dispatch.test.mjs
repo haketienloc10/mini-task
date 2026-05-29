@@ -33,6 +33,7 @@ test('builds default codex exec command without deprecated cwd argument', async 
   assert.equal(runner.args.includes('--cwd'), false);
   assert.equal(runner.args.includes('--prompt-file'), false);
 
+  if (typeof store !== "undefined") await store.close();
   await rm(root, { recursive: true, force: true });
 });
 
@@ -64,6 +65,7 @@ test('builds plain prompt for default task mode', async () => {
   assert.doesNotMatch(runner.prompt, /harness_(planner|generator|plan_reviewer|evaluator)/);
   assert.doesNotMatch(runner.prompt, /Task: Plain task/);
 
+  if (typeof store !== "undefined") await store.close();
   await rm(root, { recursive: true, force: true });
 });
 
@@ -93,6 +95,7 @@ test('builds codex exec resume command when task has a session ref', async () =>
   assert.equal(runner.stdin, 'Next message');
   assert.equal(runner.parseJsonOutput, true);
 
+  if (typeof store !== "undefined") await store.close();
   await rm(root, { recursive: true, force: true });
 });
 
@@ -165,6 +168,7 @@ test('creates, runs, captures output, and isolates sessions per task', async () 
   assert.equal(firstResult.terminalEvents.some((event) => event.type === 'process.exited' && event.exitCode === 0), true);
   assert.equal(firstResult.terminalEvents.every((event) => event.runRef === firstResult.currentRunRef || event.runRef), true);
 
+  if (typeof store !== "undefined") await store.close();
   await rm(root, { recursive: true, force: true });
 });
 
@@ -200,6 +204,7 @@ test('runs default task mode through an isolated session with plain prompt artif
   assert.doesNotMatch(prompt, /Subagent:/);
   assert.doesNotMatch(prompt, /harness_(planner|generator|plan_reviewer|evaluator)/);
 
+  if (typeof store !== "undefined") await store.close();
   await rm(root, { recursive: true, force: true });
 });
 
@@ -229,6 +234,7 @@ test('marks task failed when workspace is invalid', async () => {
   assert.ok(result.sessionRef);
   assert.ok(result.finishedAt);
 
+  if (typeof store !== "undefined") await store.close();
   await rm(root, { recursive: true, force: true });
 });
 
@@ -260,6 +266,7 @@ test('marks task failed when runner exits with non-zero code', async () => {
   assert.equal(result.error, 'Process exited with code 7');
   assert.match(result.log, /fake codex failure/);
 
+  if (typeof store !== "undefined") await store.close();
   await rm(root, { recursive: true, force: true });
 });
 
@@ -309,6 +316,7 @@ test('TaskStore migrates legacy tasks and creates a default project', async () =
   assert.equal(tasks[0].projectId, 'default-project');
   assert.ok(Array.isArray(tasks[0].messages));
 
+  if (typeof store !== "undefined") await store.close();
   await rm(root, { recursive: true, force: true });
 });
 
@@ -341,6 +349,7 @@ test('runTask uses the project workspace instead of task-level workspace', async
   const commandArtifact = JSON.parse(await readFile(path.join(result.runArtifactPath, 'command.json'), 'utf8'));
   assert.equal(commandArtifact.cwd, path.resolve(projectWorkspace));
 
+  if (typeof store !== "undefined") await store.close();
   await rm(root, { recursive: true, force: true });
 });
 
